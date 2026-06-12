@@ -486,25 +486,40 @@ tbody tr:last-child td { border-bottom: none; }
         <a href="../admin/dashboard.php" class="nav-item <?= (basename($_SERVER['PHP_SELF'])=='dashboard.php'&&strpos($_SERVER['PHP_SELF'],'admin')!==false)?'active':'' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
         <a href="../admin/users.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='users.php'?'active':'' ?>"><i class="fas fa-users"></i> User Management</a>
         <a href="../admin/approvals.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='approvals.php'?'active':'' ?>"><i class="fas fa-check-circle"></i> Purchase Approvals</a>
+        <a href="../admin/budget_periods.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='budget_periods.php'?'active':'' ?>"><i class="fas fa-calendar-alt"></i> Budget Periods</a>
+        <a href="../admin/budget_approvals.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='budget_approvals.php'?'active':'' ?>"><i class="fas fa-file-invoice-dollar"></i> Allocation Approvals</a>
+        <a href="../admin/returns_monitoring.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='returns_monitoring.php'?'active':'' ?>"><i class="fas fa-undo-alt"></i> Returns Monitoring</a>
+        <a href="../admin/audit_trail.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='audit_trail.php'?'active':'' ?>"><i class="fas fa-shield-alt"></i> Audit Trail</a>
         <a href="../admin/reports.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='reports.php'?'active':'' ?>"><i class="fas fa-chart-bar"></i> Reports</a>
         <a href="../admin/activity_logs.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='activity_logs.php'?'active':'' ?>"><i class="fas fa-history"></i> Activity Logs</a>
         <a href="../admin/archive.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='archive.php'?'active':'' ?>"><i class="fas fa-archive"></i> Archive</a>
 <?php elseif ($role === 'budget_manager'): ?>
         <div class="nav-section-label">Budget Management</div>
         <a href="../budget_manager/dashboard.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='dashboard.php'?'active':'' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
-        <a href="../budget_manager/budget.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='budget.php'?'active':'' ?>"><i class="fas fa-wallet"></i> Budget Allocation</a>
+        <a href="../budget_manager/budget.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='budget.php'?'active':'' ?>"><i class="fas fa-wallet"></i> Budget Periods</a>
+        <a href="../budget_manager/allocations.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='allocations.php'?'active':'' ?>"><i class="fas fa-share-square"></i> Allocations</a>
+        <a href="../budget_manager/requests.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='requests.php'?'active':'' ?>"><i class="fas fa-inbox"></i> Budget Requests</a>
         <a href="../budget_manager/expenses.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='expenses.php'?'active':'' ?>"><i class="fas fa-receipt"></i> Expense Tracking</a>
+        <a href="../budget_manager/returns.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='returns.php'?'active':'' ?>"><i class="fas fa-undo-alt"></i> Returns</a>
         <a href="../budget_manager/reports.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='reports.php'?'active':'' ?>"><i class="fas fa-chart-pie"></i> Budget Reports</a>
 <?php elseif ($role === 'inventory_manager'): ?>
         <div class="nav-section-label">Inventory</div>
         <a href="../inventory_manager/dashboard.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='dashboard.php'?'active':'' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
         <a href="../inventory_manager/inventory.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='inventory.php'?'active':'' ?>"><i class="fas fa-boxes"></i> Inventory</a>
+        <a href="../inventory_manager/requests.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='requests.php'?'active':'' ?>"><i class="fas fa-inbox"></i> Inventory Requests</a>
+        <a href="../inventory_manager/usage_monitoring.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='usage_monitoring.php'?'active':'' ?>"><i class="fas fa-chart-line"></i> Usage Monitoring</a>
+        <a href="../inventory_manager/returns.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='returns.php'?'active':'' ?>"><i class="fas fa-undo-alt"></i> Returns</a>
         <a href="../inventory_manager/purchases.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='purchases.php'?'active':'' ?>"><i class="fas fa-shopping-cart"></i> Purchases</a>
         <a href="../inventory_manager/reports.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='reports.php'?'active':'' ?>"><i class="fas fa-chart-bar"></i> Reports</a>
         <a href="../inventory_manager/review.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='review.php'?'active':'' ?>"><i class="fas fa-clipboard-check"></i> Inventory Review</a>
 <?php elseif ($role === 'user'): ?>
         <div class="nav-section-label">Encoder</div>
         <a href="../user/dashboard.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='dashboard.php'?'active':'' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
+        <a href="../user/budget_requests.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='budget_requests.php'?'active':'' ?>"><i class="fas fa-hand-holding-usd"></i> Budget Requests</a>
+        <a href="../user/my_budget.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='my_budget.php'?'active':'' ?>"><i class="fas fa-wallet"></i> My Budget</a>
+        <a href="../user/inventory_requests.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='inventory_requests.php'?'active':'' ?>"><i class="fas fa-boxes"></i> Inventory Requests</a>
+        <a href="../user/my_inventory.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='my_inventory.php'?'active':'' ?>"><i class="fas fa-cubes"></i> My Inventory</a>
+        <a href="../user/returns.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='returns.php'?'active':'' ?>"><i class="fas fa-undo-alt"></i> Returns</a>
         <a href="../user/submit_purchase.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='submit_purchase.php'?'active':'' ?>"><i class="fas fa-plus-circle"></i> Submit Purchase</a>
         <a href="../user/my_purchases.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='my_purchases.php'?'active':'' ?>"><i class="fas fa-list"></i> My Purchases</a>
         <a href="../user/inventory_view.php" class="nav-item <?= basename($_SERVER['PHP_SELF'])=='inventory_view.php'?'active':'' ?>"><i class="fas fa-eye"></i> View Inventory</a>

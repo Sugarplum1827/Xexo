@@ -463,26 +463,6 @@ body::before {
             <i class="fas fa-sign-in-alt"></i> Sign In
         </button>
     </form>
-
-    <div class="demo-creds">
-        <h4>🔑 Demo Credentials</h4>
-        <div class="demo-item">
-            <span class="role-tag">Admin</span>
-            <strong>admin / admin123</strong>
-        </div>
-        <div class="demo-item">
-            <span class="role-tag">Budget Manager</span>
-            <strong>budgetmgr / budgetmgr123</strong>
-        </div>
-        <div class="demo-item">
-            <span class="role-tag">Inventory Manager</span>
-            <strong>invmgr / invmgr123</strong>
-        </div>
-        <div class="demo-item">
-            <span class="role-tag">Encoder</span>
-            <strong>encoder1 / encoder123</strong>
-        </div>
-    </div>
 </div>
 
 <script>

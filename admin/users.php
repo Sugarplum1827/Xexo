@@ -62,21 +62,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $users = $conn->query("SELECT u.*, c.full_name AS created_by_name FROM users u LEFT JOIN users c ON c.id = u.created_by ORDER BY u.created_at DESC")->fetch_all(MYSQLI_ASSOC);
 include '../includes/header.php';
 ?>
-<style>
-.pw-wrap { position: relative; }
-.pw-wrap .form-control { padding-right: 42px; }
-.eye-btn {
-    position: absolute;
-    right: 12px; top: 50%; transform: translateY(-50%);
-    background: none; border: none;
-    color: #98989a;
-    font-size: 15px; cursor: pointer;
-    padding: 2px 4px; line-height: 1;
-    transition: color 0.2s;
-}
-.eye-btn:hover { color: #b91c1c; }
-</style>
-
 <?php if ($msg): ?><div class="alert alert-<?= $msgType ?>"><i class="fas fa-<?= $msgType==='success'?'check-circle':'exclamation-circle' ?>"></i><?= htmlspecialchars($msg) ?></div><?php endif; ?>
 
 <div class="card" style="margin-bottom:24px;">
@@ -166,10 +151,7 @@ include '../includes/header.php';
                 </div>
                 <div class="form-group">
                     <label>Password *</label>
-                    <div class="pw-wrap">
-                        <input type="password" name="password" id="createPassword" class="form-control" required placeholder="Min 8 characters">
-                        <button type="button" class="eye-btn" onclick="toggleEye('createPassword',this)" tabindex="-1"><i class="fas fa-eye"></i></button>
-                    </div>
+                    <input type="password" name="password" class="form-control" required placeholder="Min 8 characters">
                 </div>
             </div>
             <button type="submit" class="btn btn-gold" style="width:100%"><i class="fas fa-user-plus"></i> Create User</button>
@@ -189,10 +171,7 @@ include '../includes/header.php';
             <input type="hidden" name="user_id" id="resetUserId">
             <div class="form-group">
                 <label>New Password</label>
-                <div class="pw-wrap">
-                    <input type="password" name="new_password" id="resetPassword" class="form-control" required placeholder="Enter new password">
-                    <button type="button" class="eye-btn" onclick="toggleEye('resetPassword',this)" tabindex="-1"><i class="fas fa-eye"></i></button>
-                </div>
+                <input type="password" name="new_password" class="form-control" required>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%"><i class="fas fa-key"></i> Reset Password</button>
         </form>
@@ -203,28 +182,10 @@ include '../includes/header.php';
 function openResetModal(id, name) {
     document.getElementById('resetUserId').value = id;
     document.getElementById('resetName').textContent = name;
-    // Reset eye state when modal opens
-    const rp = document.getElementById('resetPassword');
-    if (rp) { rp.type = 'password'; }
-    const eyeBtn = document.querySelector('#resetModal .eye-btn i');
-    if (eyeBtn) { eyeBtn.classList.replace('fa-eye-slash','fa-eye'); }
     document.getElementById('resetModal').classList.add('open');
 }
 document.querySelectorAll('.modal-overlay').forEach(o => {
     o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
 });
-function toggleEye(inputId, btn) {
-    const input = document.getElementById(inputId);
-    const icon  = btn.querySelector('i');
-    if (input.type === 'password') {
-        input.type = 'text';
-        icon.classList.replace('fa-eye', 'fa-eye-slash');
-        btn.style.color = '#b91c1c';
-    } else {
-        input.type = 'password';
-        icon.classList.replace('fa-eye-slash', 'fa-eye');
-        btn.style.color = '';
-    }
-}
 </script>
 <?php include '../includes/footer.php'; ?>

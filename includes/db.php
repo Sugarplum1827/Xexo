@@ -1,8 +1,8 @@
 <?php
-define('DB_HOST', 'localhost');
-define('DB_USER', 'laraveluser');
-define('DB_PASS', 'StrongPassword123');
-define('DB_NAME', 'xexo_val');
+define('DB_HOST', 'sql102.infinityfree.com');
+define('DB_USER', 'if0_41212959');
+define('DB_PASS', 'n6YstrO9R9c');
+define('DB_NAME', 'if0_41212959_xexo');
 
 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
