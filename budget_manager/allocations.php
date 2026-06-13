@@ -48,8 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          admin_approval_status, admin_approved_by, admin_approved_at, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, NOW(), ?)
                 ");
-                $stmt->bind_param("iiissdii", $budget_id, $encoder_id, $is_shared,
-                                  $title, $purpose, $amount, $date, $uid, $uid);
+                // 9 placeholders: budget_id(i), encoder_id(i), is_shared(i),
+                //                 title(s), purpose(s), amount(d), date(s),
+                //                 admin_approved_by(i), created_by(i)
+                $stmt->bind_param("iiissdsii",
+                    $budget_id, $encoder_id, $is_shared,
+                    $title, $purpose, $amount, $date,
+                    $uid, $uid);
                 $stmt->execute(); $stmt->close();
 
                 logActivity($conn, 'CREATE_ALLOCATION',
