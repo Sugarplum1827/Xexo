@@ -8,7 +8,9 @@ $uid = $_SESSION['user_id'];
 $myPurchases  = $conn->query("SELECT COUNT(*) c FROM purchases WHERE submitted_by=$uid")->fetch_assoc()['c'];
 $pendingMine  = $conn->query("SELECT COUNT(*) c FROM purchases WHERE submitted_by=$uid AND status='pending'")->fetch_assoc()['c'];
 $approvedMine = $conn->query("SELECT COUNT(*) c FROM purchases WHERE submitted_by=$uid AND status='approved'")->fetch_assoc()['c'];
-$totalSpent   = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE submitted_by=$uid AND status='approved'")->fetch_assoc()['s'];
+// amount_used on allocations includes both approved AND pending (pending is reserved)
+// so totalSpent should also include pending to match what the allocation shows as "used"
+$totalSpent   = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE submitted_by=$uid AND status IN ('approved','pending')")->fetch_assoc()['s'];
 
 // Only show budgets allocated and APPROVED for this encoder (personal or shared)
 $myAllocations = $conn->query("

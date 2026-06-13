@@ -281,15 +281,19 @@ INSERT IGNORE INTO inventory (item_name, category, unit, current_stock, minimum_
 ('Soy Sauce', 'Condiments', 'bottle', 6, 2, 35.00),
 ('Vinegar', 'Condiments', 'bottle', 5, 2, 28.00);
 
--- ── Migration: add end_datetime to budget_allocations if not already present
+-- ══════════════════════════════════════════════════════════════
+-- MIGRATION — run this in phpMyAdmin > SQL if upgrading an
+-- existing database (fresh installs already have this column).
+-- ══════════════════════════════════════════════════════════════
+-- Step 1: Add end_datetime column to existing budget_allocations table
 ALTER TABLE budget_allocations
-    ADD COLUMN IF NOT EXISTS end_datetime DATETIME NULL
-        COMMENT 'Encoder stated deadline; used as return due date'
+    ADD COLUMN end_datetime DATETIME NULL
     AFTER allocation_date;
 
--- ── Migration: backfill end_datetime from linked budget_requests for existing rows
+-- Step 2: Backfill end_datetime from the original budget_requests
 UPDATE budget_allocations ba
 JOIN budget_requests br ON ba.budget_request_id = br.id
 SET ba.end_datetime = br.end_datetime
 WHERE ba.end_datetime IS NULL
   AND br.end_datetime IS NOT NULL;
+-- ══════════════════════════════════════════════════════════════
