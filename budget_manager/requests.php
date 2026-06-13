@@ -14,35 +14,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'approve') {
         $alloc_amount = (float)$_POST['allocated_amount'];
         $budget_id    = (int)$_POST['budget_id'];
-        $req = $conn->query("SELECT * FROM budget_requests WHERE id=$rid")->fetch_assoc();
+        $req    = $conn->query("SELECT * FROM budget_requests WHERE id=$rid")->fetch_assoc();
+        $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
 
-        if ($req) {
-            // Mark request as approved
-            $stmt = $conn->prepare("UPDATE budget_requests SET status='approved', reviewed_by=?, review_remarks=?, reviewed_at=NOW() WHERE id=?");
-            $stmt->bind_param("isi", $uid, $rmk, $rid);
-            $stmt->execute(); $stmt->close();
+        if ($req && $budget) {
+            // Per-budget remaining: sum only allocations tied to this budget
+            $alreadyAllocated = (float)$conn->query("
+                SELECT COALESCE(SUM(allocated_amount), 0) AS s
+                FROM budget_allocations
+                WHERE budget_id = $budget_id AND admin_approval_status = 'approved'
+            ")->fetch_assoc()['s'];
+            $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
 
-            // Create allocation — directly APPROVED (no Admin step needed for encoder budget requests)
-            $enc_id  = $req['encoder_id'];
-            $title   = $conn->real_escape_string($req['request_title']);
-            $purpose = $conn->real_escape_string($req['description'] ?? '');
-            $date    = date('Y-m-d');
-            $conn->query("
-                INSERT INTO budget_allocations
-                    (budget_id, budget_request_id, encoder_id, is_shared,
-                     allocation_title, purpose, allocated_amount, allocation_date,
-                     admin_approval_status, admin_approved_by, admin_approved_at, created_by)
-                VALUES
-                    ($budget_id, $rid, $enc_id, 0,
-                     '$title', '$purpose', $alloc_amount, '$date',
-                     'approved', $uid, NOW(), $uid)
-            ");
+            if ($alloc_amount > $budgetRemaining) {
+                $msg = 'Cannot approve: allocation amount (₱' . number_format($alloc_amount, 2)
+                     . ') exceeds the unallocated balance of the selected budget period (₱'
+                     . number_format($budgetRemaining, 2) . ').';
+                $msgType = 'danger';
+            } else {
+                // Mark request as approved
+                $stmt = $conn->prepare("UPDATE budget_requests SET status='approved', reviewed_by=?, review_remarks=?, reviewed_at=NOW() WHERE id=?");
+                $stmt->bind_param("isi", $uid, $rmk, $rid);
+                $stmt->execute(); $stmt->close();
 
-            logActivity($conn, 'APPROVE_BUDGET_REQUEST',
-                "Approved budget request ID $rid — allocated ₱$alloc_amount directly to encoder ID $enc_id");
-            $msg = 'Request approved. ₱' . number_format($alloc_amount, 2)
-                 . ' has been allocated and is now available to the encoder immediately.';
-            $msgType = 'success';
+                // Create allocation — directly APPROVED (encoder can use immediately)
+                $enc_id  = $req['encoder_id'];
+                $title   = $conn->real_escape_string($req['request_title']);
+                $purpose = $conn->real_escape_string($req['description'] ?? '');
+                $date    = date('Y-m-d');
+                $conn->query("
+                    INSERT INTO budget_allocations
+                        (budget_id, budget_request_id, encoder_id, is_shared,
+                         allocation_title, purpose, allocated_amount, allocation_date,
+                         admin_approval_status, admin_approved_by, admin_approved_at, created_by)
+                    VALUES
+                        ($budget_id, $rid, $enc_id, 0,
+                         '$title', '$purpose', $alloc_amount, '$date',
+                         'approved', $uid, NOW(), $uid)
+                ");
+
+                logActivity($conn, 'APPROVE_BUDGET_REQUEST',
+                    "Approved request #$rid — ₱$alloc_amount from budget #$budget_id to encoder #$enc_id");
+                $msg = 'Request approved. ₱' . number_format($alloc_amount, 2)
+                     . ' is now immediately available to the encoder from "'
+                     . htmlspecialchars($budget['period_label']) . '".';
+                $msgType = 'success';
+            }
+        } else {
+            $msg = 'Budget request or selected budget period not found.';
+            $msgType = 'danger';
         }
     }
 
@@ -184,15 +204,24 @@ include '../includes/header.php';
             <div class="form-group">
                 <label>Budget Period *</label>
                 <select name="budget_id" class="form-control" required>
-                    <?php foreach ($activeBudgets as $b): ?>
-                    <option value="<?= $b['id'] ?>">
-                        <?= htmlspecialchars($b['period_label']) ?> (₱<?= number_format($b['allocated_amount'], 2) ?>)
+                    <?php foreach ($activeBudgets as $b):
+                        // Per-budget remaining
+                        $bAllocated = (float)$conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE budget_id={$b['id']} AND admin_approval_status='approved'")->fetch_assoc()['s'];
+                        $bRemaining = $b['allocated_amount'] - $bAllocated;
+                    ?>
+                    <option value="<?= $b['id'] ?>" <?= $bRemaining <= 0 ? 'disabled' : '' ?>>
+                        <?= htmlspecialchars($b['period_label']) ?>
+                        — Unallocated: ₱<?= number_format($bRemaining, 2) ?>
+                        <?= $bRemaining <= 0 ? ' (fully allocated)' : '' ?>
                     </option>
                     <?php endforeach; ?>
                     <?php if (empty($activeBudgets)): ?>
                     <option value="">No active approved budgets available</option>
                     <?php endif; ?>
                 </select>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+                    Only the unallocated balance of the selected period can be assigned.
+                </div>
             </div>
 
             <div class="form-group">

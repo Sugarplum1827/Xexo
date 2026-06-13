@@ -6,17 +6,25 @@ $uid = $_SESSION['user_id'];
 
 $msg = ''; $msgType = '';
 
-// Helper: reload allocations with computed remaining
+// Load encoder's approved allocations (personal + shared)
+// Uses (int) cast on id so JS and PHP comparisons are consistent
 function loadAllocations($conn, $uid) {
     $rows = $conn->query("
-        SELECT ba.*, b.period_label
+        SELECT ba.*,
+               b.period_label,
+               b.start_date   AS budget_start,
+               b.end_date     AS budget_end,
+               u.full_name    AS created_by_name
         FROM budget_allocations ba
         JOIN budgets b ON ba.budget_id = b.id
+        JOIN users u   ON ba.created_by = u.id
         WHERE ba.admin_approval_status = 'approved'
           AND (ba.encoder_id = $uid OR ba.is_shared = 1)
         ORDER BY ba.allocation_date DESC
     ")->fetch_all(MYSQLI_ASSOC);
+
     foreach ($rows as &$r) {
+        $r['id']        = (int)$r['id'];          // always int — fixes === mismatch
         $r['remaining'] = round($r['allocated_amount'] - $r['amount_used'], 2);
     }
     unset($r);
@@ -33,26 +41,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $price    = (float)$_POST['unit_price'];
     $supplier = trim($_POST['supplier']);
     $date     = $_POST['purchase_date'];
-    $alloc_id = (int)$_POST['allocation_id'];
+    $alloc_id = (int)$_POST['allocation_id'];   // int cast
     $total    = round($qty * $price, 2);
 
-    // --- Validate allocation ---
-    $alloc = null;
-    foreach ($myAllocations as $a) {
-        if ($a['id'] === $alloc_id) { $alloc = $a; break; }
-    }
+    // --- Validate allocation: re-query directly from DB (authoritative, avoids stale PHP array) ---
+    $alloc = $conn->query("
+        SELECT ba.*,
+               b.period_label,
+               b.start_date AS budget_start,
+               b.end_date   AS budget_end
+        FROM budget_allocations ba
+        JOIN budgets b ON ba.budget_id = b.id
+        WHERE ba.id = $alloc_id
+          AND ba.admin_approval_status = 'approved'
+          AND (ba.encoder_id = $uid OR ba.is_shared = 1)
+        LIMIT 1
+    ")->fetch_assoc();
 
     if (!$alloc) {
-        $msg = 'Invalid or unauthorized budget allocation selected.';
+        $msg = 'Invalid or unauthorized budget allocation selected. Please refresh the page and try again.';
         $msgType = 'danger';
     } elseif ($total <= 0) {
         $msg = 'Purchase total must be greater than zero.';
         $msgType = 'danger';
-    } elseif ($total > $alloc['remaining']) {
-        $msg = 'Insufficient budget in the selected allocation. '
-             . 'Available: ' . formatCurrency($alloc['remaining'])
-             . ', Purchase total: ' . formatCurrency($total) . '.';
-        $msgType = 'danger';
+    } else {
+        $live_remaining = round($alloc['allocated_amount'] - $alloc['amount_used'], 2);
+        if ($total > $live_remaining) {
+            $msg = 'Insufficient budget in the selected allocation. '
+                 . 'Available: ' . formatCurrency($live_remaining)
+                 . ', Purchase total: ' . formatCurrency($total) . '.';
+            $msgType = 'danger';
+        }
     }
 
     // --- Handle receipt upload ---
@@ -75,12 +94,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // --- Insert purchase and reserve budget ---
     if ($msgType !== 'danger') {
-        $rpQ    = $receiptPath ? "'" . $conn->real_escape_string($receiptPath) . "'" : 'NULL';
-        $supp   = $conn->real_escape_string($supplier);
-        $iname  = $conn->real_escape_string($itemName);
-        $iunit  = $conn->real_escape_string($unit);
+        $rpQ   = $receiptPath ? "'" . $conn->real_escape_string($receiptPath) . "'" : 'NULL';
+        $supp  = $conn->real_escape_string($supplier);
+        $iname = $conn->real_escape_string($itemName);
+        $iunit = $conn->real_escape_string($unit);
 
-        // Insert purchase with allocation_id stored
         $conn->query("
             INSERT INTO purchases
                 (item_name, quantity, unit, unit_price, supplier, purchase_date,
@@ -91,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ");
         $newPid = $conn->insert_id;
 
-        // Reserve the amount immediately so the encoder cannot double-spend
+        // Reserve the amount so the encoder cannot double-spend while pending
         $conn->query("
             UPDATE budget_allocations
             SET amount_used = amount_used + $total
@@ -99,14 +117,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ");
 
         logActivity($conn, 'SUBMIT_PURCHASE',
-            "Submitted purchase #$newPid: $itemName x$qty @ ₱$price = ₱$total | allocation_id=$alloc_id");
+            "Purchase #$newPid: $itemName x$qty @ ₱$price = ₱$total charged to allocation #$alloc_id (budget #{$alloc['budget_id']})");
 
         $msg = 'Purchase submitted! ₱' . number_format($total, 2)
              . ' reserved from "' . htmlspecialchars($alloc['allocation_title'] ?? 'Allocation')
              . '". Awaiting admin review.';
         $msgType = 'success';
 
-        // Reload allocations after reservation
+        // Reload after reservation
         $myAllocations  = loadAllocations($conn, $uid);
         $totalAvailable = array_sum(array_column($myAllocations, 'remaining'));
     }
@@ -127,8 +145,10 @@ include '../includes/header.php';
 <div class="alert alert-danger" style="margin-bottom:20px;">
     <i class="fas fa-lock"></i>
     <strong>No approved budget available.</strong>
-    You need an approved budget allocation before you can submit a purchase.
-    <a href="budget_requests.php" style="color:var(--danger);font-weight:700;margin-left:8px;">Request a Budget →</a>
+    You need an approved budget allocation before submitting a purchase.
+    <a href="budget_requests.php" style="color:var(--danger);font-weight:700;margin-left:8px;">
+        Request a Budget →
+    </a>
 </div>
 <?php endif; ?>
 
@@ -162,10 +182,14 @@ include '../includes/header.php';
                 <option value="<?= $a['id'] ?>"
                     data-remaining="<?= $a['remaining'] ?>"
                     data-title="<?= htmlspecialchars(addslashes($a['allocation_title'] ?? 'Allocation')) ?>"
+                    data-period="<?= htmlspecialchars($a['period_label']) ?>"
+                    data-start="<?= $a['budget_start'] ?>"
+                    data-end="<?= $a['budget_end'] ?>"
                     data-shared="<?= $a['is_shared'] ? 1 : 0 ?>">
                     <?= htmlspecialchars($a['allocation_title'] ?? 'Allocation') ?>
                     <?= $a['is_shared'] ? ' [Shared]' : '' ?>
-                    — Remaining: <?= formatCurrency($a['remaining']) ?>
+                    — <?= formatCurrency($a['remaining']) ?> remaining
+                    (<?= htmlspecialchars($a['period_label']) ?>)
                 </option>
                 <?php endif; ?>
                 <?php endforeach; ?>
@@ -174,33 +198,50 @@ include '../includes/header.php';
             <!-- Live budget info -->
             <div id="budgetInfoBox" style="display:none;margin-top:14px;">
                 <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:8px;">
-                    <div><span style="color:var(--text-muted)">Available:</span>
-                         <strong id="biRemaining" style="color:var(--success)">—</strong></div>
-                    <div><span style="color:var(--text-muted)">This Purchase:</span>
-                         <strong id="biTotal" style="color:var(--primary)">₱0.00</strong></div>
-                    <div><span style="color:var(--text-muted)">After:</span>
-                         <strong id="biAfter">—</strong></div>
+                    <div>
+                        <span style="color:var(--text-muted)">Period:</span>
+                        <strong id="biPeriod">—</strong>
+                    </div>
+                    <div>
+                        <span style="color:var(--text-muted)">Available:</span>
+                        <strong id="biRemaining" style="color:var(--success)">—</strong>
+                    </div>
+                    <div>
+                        <span style="color:var(--text-muted)">This Purchase:</span>
+                        <strong id="biTotal" style="color:var(--primary)">₱0.00</strong>
+                    </div>
+                    <div>
+                        <span style="color:var(--text-muted)">After:</span>
+                        <strong id="biAfter">—</strong>
+                    </div>
                 </div>
                 <div class="progress-bar" style="height:8px;">
                     <div class="progress-fill green" id="biBar" style="width:0%;transition:width .3s,background .3s;"></div>
                 </div>
-                <div id="biWarning" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(185,28,28,.08);border-radius:8px;color:var(--danger);font-size:13px;font-weight:600;">
-                    <i class="fas fa-exclamation-triangle"></i> Purchase total exceeds your available budget!
+                <div id="biWarning" style="display:none;margin-top:8px;padding:8px 12px;
+                     background:rgba(185,28,28,.08);border-radius:8px;
+                     color:var(--danger);font-size:13px;font-weight:600;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Purchase total exceeds your available allocation balance!
                 </div>
             </div>
         </div>
 
         <form method="POST" enctype="multipart/form-data" id="purchaseForm">
-            <input type="hidden" name="allocation_id" id="allocIdInput">
+            <!-- Hidden: set by the selector above, not by the <select> itself to avoid
+                 any accidental value mismatch when the form posts -->
+            <input type="hidden" name="allocation_id" id="allocIdInput" value="">
 
             <div class="form-group">
                 <label>Item Name *</label>
-                <input type="text" name="item_name" id="itemNameInput" class="form-control"
-                       required placeholder="e.g. All-Purpose Flour"
+                <input type="text" name="item_name" id="itemNameInput"
+                       class="form-control" required
+                       placeholder="e.g. All-Purpose Flour"
                        oninput="checkInventory(this.value)">
             </div>
 
-            <div id="stockHint" style="display:none;padding:10px 14px;background:var(--cream);border-radius:8px;margin-bottom:12px;font-size:13px;border:1px solid var(--cream-dark);">
+            <div id="stockHint" style="display:none;padding:10px 14px;background:var(--cream);
+                 border-radius:8px;margin-bottom:12px;font-size:13px;border:1px solid var(--cream-dark);">
                 <i class="fas fa-info-circle" style="color:var(--forest)"></i>
                 <span id="stockHintText"></span>
             </div>
@@ -228,7 +269,6 @@ include '../includes/header.php';
                 </div>
                 <div class="form-group">
                     <label>Total Amount</label>
-                    <!-- Big dynamic total display -->
                     <div id="totalDisplay" style="
                         background: var(--cream);
                         border: 2px solid var(--primary);
@@ -267,9 +307,12 @@ include '../includes/header.php';
                 </div>
             </div>
 
-            <button type="submit" class="btn btn-gold" style="width:100%" id="submitBtn">
+            <button type="submit" class="btn btn-gold" style="width:100%" id="submitBtn" disabled>
                 <i class="fas fa-paper-plane"></i> Submit Purchase
             </button>
+            <p id="submitHint" style="font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px;">
+                Select an allocation above to enable this button.
+            </p>
         </form>
 
         <?php endif; ?>
@@ -281,25 +324,28 @@ include '../includes/header.php';
         <div class="card">
             <div class="card-header">
                 <span class="card-title">My Budget Allocations</span>
-                <a href="my_budget.php" class="btn btn-sm btn-outline">View All</a>
+                <a href="my_budget.php" class="btn btn-sm btn-outline">Full View</a>
             </div>
             <?php if (empty($myAllocations)): ?>
             <p style="text-align:center;color:var(--text-muted);padding:20px;">No allocations yet.</p>
             <?php else: ?>
             <?php foreach ($myAllocations as $a):
                 $pct = $a['allocated_amount'] > 0
-                    ? min(100, ($a['amount_used'] / $a['allocated_amount']) * 100)
-                    : 0;
+                    ? min(100, ($a['amount_used'] / $a['allocated_amount']) * 100) : 0;
             ?>
             <div style="margin-bottom:12px;padding:12px;border:1px solid var(--grey-200);border-radius:10px;
-                <?= $a['remaining'] <= 0 ? 'opacity:.5;' : '' ?>">
-                <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                 <?= $a['remaining'] <= 0 ? 'opacity:.5;' : '' ?>">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
                     <span style="font-weight:600;font-size:13px;">
                         <?= htmlspecialchars($a['allocation_title'] ?? 'Allocation') ?>
                     </span>
                     <?php if ($a['is_shared']): ?>
                     <span class="badge badge-pending" style="font-size:10px;">Shared</span>
                     <?php endif; ?>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+                    <?= htmlspecialchars($a['period_label']) ?>
+                    · <?= $a['budget_start'] ?> to <?= $a['budget_end'] ?>
                 </div>
                 <div class="progress-bar" style="height:6px;margin-bottom:6px;">
                     <div class="progress-fill <?= $pct>=90?'red':($pct>=70?'orange':'green') ?>"
@@ -320,7 +366,7 @@ include '../includes/header.php';
         <div class="card">
             <div class="card-header"><span class="card-title">Inventory Stock Reference</span></div>
             <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-                Check existing stock before purchasing to avoid duplicates.
+                Check existing stock before purchasing.
             </p>
             <div class="table-wrap" style="max-height:280px;overflow-y:auto;">
                 <table>
@@ -346,7 +392,7 @@ include '../includes/header.php';
             </div>
         </div>
 
-    </div><!-- /right panel -->
+    </div>
 </div>
 
 <script>
@@ -359,10 +405,9 @@ const inventory = <?= json_encode(array_map(fn($i) => [
 
 let currentRemaining = 0;
 
-function php_formatCurrency(n) {
+function fmtCur(n) {
     return '₱' + parseFloat(n).toLocaleString('en-PH', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        minimumFractionDigits: 2, maximumFractionDigits: 2
     });
 }
 
@@ -370,19 +415,25 @@ function updateBudgetInfo(sel) {
     const opt        = sel.options[sel.selectedIndex];
     const box        = document.getElementById('budgetInfoBox');
     const allocInput = document.getElementById('allocIdInput');
+    const hint       = document.getElementById('submitHint');
 
     if (!opt.value) {
-        box.style.display = 'none';
-        allocInput.value  = '';
-        currentRemaining  = 0;
+        box.style.display    = 'none';
+        allocInput.value     = '';
+        currentRemaining     = 0;
+        setSubmitState(false, 'Select an allocation above to enable this button.');
         recalcTotal();
         return;
     }
 
+    // Set the hidden input to the selected allocation id
     allocInput.value = opt.value;
     currentRemaining = parseFloat(opt.dataset.remaining) || 0;
-    document.getElementById('biRemaining').textContent = php_formatCurrency(currentRemaining);
+
+    document.getElementById('biPeriod').textContent    = opt.dataset.period + ' (' + opt.dataset.start + ' – ' + opt.dataset.end + ')';
+    document.getElementById('biRemaining').textContent = fmtCur(currentRemaining);
     box.style.display = 'block';
+
     recalcTotal();
 }
 
@@ -391,20 +442,20 @@ function recalcTotal() {
     const price = parseFloat(document.getElementById('priceInput')?.value) || 0;
     const total = Math.round(qty * price * 100) / 100;
 
-    // --- Big total display ---
-    const display = document.getElementById('totalDisplay');
-    display.textContent = php_formatCurrency(total);
-    const overBudget = total > currentRemaining && currentRemaining > 0;
+    // Big total display
+    const display    = document.getElementById('totalDisplay');
+    const overBudget = currentRemaining > 0 && total > currentRemaining;
+    display.textContent      = fmtCur(total);
     display.style.borderColor = overBudget ? 'var(--danger)' : 'var(--primary)';
     display.style.color       = overBudget ? 'var(--danger)' : 'var(--forest)';
 
-    // --- Live budget bar ---
+    // Live bar
     if (currentRemaining > 0) {
         const after = Math.round((currentRemaining - total) * 100) / 100;
         const pct   = Math.min(100, (total / currentRemaining) * 100);
 
-        document.getElementById('biTotal').textContent = php_formatCurrency(total);
-        document.getElementById('biAfter').textContent = php_formatCurrency(after);
+        document.getElementById('biTotal').textContent = fmtCur(total);
+        document.getElementById('biAfter').textContent = fmtCur(after);
         document.getElementById('biAfter').style.color = after >= 0 ? 'var(--success)' : 'var(--danger)';
 
         const bar = document.getElementById('biBar');
@@ -414,12 +465,23 @@ function recalcTotal() {
         document.getElementById('biWarning').style.display = overBudget ? 'block' : 'none';
     }
 
-    // Disable submit when over budget or no allocation chosen
-    const btn = document.getElementById('submitBtn');
-    if (btn) {
-        const noAlloc = !document.getElementById('allocIdInput').value;
-        btn.disabled = overBudget || noAlloc;
+    const allocChosen = !!document.getElementById('allocIdInput').value;
+    if (!allocChosen) {
+        setSubmitState(false, 'Select an allocation above to enable this button.');
+    } else if (overBudget) {
+        setSubmitState(false, 'Total exceeds available allocation balance.');
+    } else if (total <= 0) {
+        setSubmitState(false, 'Enter a valid quantity and unit price.');
+    } else {
+        setSubmitState(true, '');
     }
+}
+
+function setSubmitState(enabled, hint) {
+    const btn  = document.getElementById('submitBtn');
+    const htxt = document.getElementById('submitHint');
+    if (btn)  btn.disabled = !enabled;
+    if (htxt) htxt.textContent = hint;
 }
 
 function checkInventory(val) {
@@ -429,7 +491,7 @@ function checkInventory(val) {
     const lower     = val.toLowerCase().trim();
     const match     = inventory.find(i => i.name.includes(lower) || lower.includes(i.name));
     if (match && lower.length >= 3) {
-        hintText.textContent = `Existing stock: ${match.stock} ${match.unit} (minimum: ${match.min}).`;
+        hintText.textContent = 'Existing stock: ' + match.stock + ' ' + match.unit + ' (minimum: ' + match.min + ').';
         if (!unitInput.value) unitInput.value = match.unit;
         hint.style.display = 'block';
     } else {
@@ -437,7 +499,7 @@ function checkInventory(val) {
     }
 }
 
-// Final guard on form submit
+// Hard guard on submit
 document.getElementById('purchaseForm')?.addEventListener('submit', function(e) {
     const allocId = document.getElementById('allocIdInput').value;
     if (!allocId) {
@@ -449,9 +511,9 @@ document.getElementById('purchaseForm')?.addEventListener('submit', function(e) 
     const qty   = parseFloat(document.getElementById('qtyInput').value)   || 0;
     const price = parseFloat(document.getElementById('priceInput').value) || 0;
     const total = Math.round(qty * price * 100) / 100;
-    if (total > currentRemaining) {
+    if (currentRemaining > 0 && total > currentRemaining) {
         e.preventDefault();
-        alert('Purchase total (' + php_formatCurrency(total) + ') exceeds your available budget (' + php_formatCurrency(currentRemaining) + ').');
+        alert('Purchase total (' + fmtCur(total) + ') exceeds your available balance (' + fmtCur(currentRemaining) + ').');
     }
 });
 </script>
