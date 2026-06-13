@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     reviewed_at DATETIME NULL,
     inventory_id INT NULL,
     budget_id INT NULL,
+    allocation_id INT NULL,      -- which budget_allocation this purchase is charged to
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (submitted_by) REFERENCES users(id),
     FOREIGN KEY (inventory_id) REFERENCES inventory(id)
