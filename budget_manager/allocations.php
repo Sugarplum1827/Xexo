@@ -10,13 +10,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $uid    = $_SESSION['user_id'];
 
     if ($action === 'create_allocation') {
-        $budget_id  = (int)$_POST['budget_id'];
-        $encoder_id = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : 0;
-        $is_shared  = isset($_POST['is_shared']) ? 1 : 0;
-        $title      = trim($_POST['allocation_title']);
-        $purpose    = trim($_POST['purpose']);
-        $amount     = (float)$_POST['allocated_amount'];
-        $date       = date('Y-m-d');
+        $budget_id    = (int)$_POST['budget_id'];
+        $encoder_id   = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : 0;
+        $is_shared    = isset($_POST['is_shared']) ? 1 : 0;
+        $title        = trim($_POST['allocation_title']);
+        $purpose      = trim($_POST['purpose']);
+        $amount       = (float)$_POST['allocated_amount'];
+        $date         = date('Y-m-d');
+        $end_datetime = trim($_POST['end_datetime'] ?? '');
+        if ($end_datetime === '') $end_datetime = null;
 
         if ($is_shared) $encoder_id = 0;  // 0 means shared/no specific encoder
 
@@ -42,14 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msgType = 'danger';
             } else {
                 // Use direct SQL with safe integer cast; encoder_id=0 means shared (NULL in DB via NULLIF)
+                $endDtVal = $end_datetime ? "'" . $conn->real_escape_string($end_datetime) . "'" : 'NULL';
                 $stmt = $conn->prepare("
                     INSERT INTO budget_allocations
                         (budget_id, encoder_id, is_shared, allocation_title, purpose,
-                         allocated_amount, allocation_date,
+                         allocated_amount, allocation_date, end_datetime,
                          admin_approval_status, created_by)
-                    VALUES (?, NULLIF(?, 0), ?, ?, ?, ?, ?, 'pending', ?)
+                    VALUES (?, NULLIF(?, 0), ?, ?, ?, ?, ?, $endDtVal, 'pending', ?)
                 ");
-                // 8 placeholders: all non-null types; NULLIF converts 0 -> NULL for encoder_id
+                // 8 placeholders: end_datetime inlined above (avoids nullable bind complexity)
                 $stmt->bind_param("iiissdsi",
                     $budget_id, $encoder_id, $is_shared,
                     $title, $purpose, $amount, $date,
@@ -224,6 +227,11 @@ include '../includes/header.php';
                     <i class="fas fa-exclamation-triangle"></i> Amount exceeds the unallocated balance!
                 </div>
             </div>
+            <div class="form-group">
+                <label>End Date &amp; Time * <span style="font-size:11px;color:var(--text-muted);">(encoder cannot use allocation after this)</span></label>
+                <input type="datetime-local" name="end_datetime" class="form-control" required
+                       min="<?= date('Y-m-d\TH:i') ?>">
+            </div>
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                 <i class="fas fa-info-circle" style="color:var(--warning)"></i>
                 Allocations require <strong>Admin approval</strong> before they become available to the encoder.
@@ -242,7 +250,7 @@ include '../includes/header.php';
         <?php foreach ($allocations as $a):
             $rem = $a['allocated_amount'] - $a['amount_used'];
         ?>
-        <div style="border:1px solid var(--grey-200);border-radius:10px;padding:14px;margin-bottom:10px;">
+        <div style="border:1px solid var(--grey-200);border-radius:10px;padding:14px;margin-bottom:10px;<?= (!empty($a['end_datetime']) && strtotime($a['end_datetime']) < time()) ? 'opacity:.65;border-color:var(--danger);' : '' ?>">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
                 <div>
                     <strong style="font-size:14px;"><?= htmlspecialchars($a['allocation_title'] ?? '—') ?></strong>

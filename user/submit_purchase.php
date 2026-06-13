@@ -20,6 +20,7 @@ function loadAllocations($conn, $uid) {
         JOIN users u   ON ba.created_by = u.id
         WHERE ba.admin_approval_status = 'approved'
           AND (ba.encoder_id = $uid OR ba.is_shared = 1)
+          AND (ba.end_datetime IS NULL OR ba.end_datetime > NOW())
         ORDER BY ba.allocation_date DESC
     ")->fetch_all(MYSQLI_ASSOC);
 
@@ -55,10 +56,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         WHERE ba.id = $alloc_id
           AND ba.admin_approval_status = 'approved'
           AND (ba.encoder_id = $uid OR ba.is_shared = 1)
+          AND (ba.end_datetime IS NULL OR ba.end_datetime > NOW())
         LIMIT 1
     ")->fetch_assoc();
 
+    // Check expiry separately — query above already excludes expired ones via AND end_datetime > NOW()
+    // so $alloc = null could mean either not found OR expired. Re-check to give a clear message.
+    $allocExpired = null;
     if (!$alloc) {
+        $allocExpired = $conn->query("
+            SELECT ba.end_datetime, ba.allocation_title
+            FROM budget_allocations ba
+            WHERE ba.id = $alloc_id
+              AND ba.admin_approval_status = 'approved'
+              AND (ba.encoder_id = $uid OR ba.is_shared = 1)
+              AND ba.end_datetime IS NOT NULL
+              AND ba.end_datetime <= NOW()
+            LIMIT 1
+        ")->fetch_assoc();
+    }
+
+    if (!$alloc && $allocExpired) {
+        $msg = 'The allocation "' . htmlspecialchars($allocExpired['allocation_title'] ?? '')
+             . '" expired on ' . date('M d, Y h:i A', strtotime($allocExpired['end_datetime']))
+             . '. You can no longer make purchases against it.';
+        $msgType = 'danger';
+    } elseif (!$alloc) {
         $msg = 'Invalid or unauthorized budget allocation selected. Please refresh the page and try again.';
         $msgType = 'danger';
     } elseif ($total <= 0) {
@@ -185,6 +208,7 @@ include '../includes/header.php';
                     data-period="<?= htmlspecialchars($a['period_label']) ?>"
                     data-start="<?= $a['budget_start'] ?>"
                     data-end="<?= $a['budget_end'] ?>"
+                    data-enddatetime="<?= $a['end_datetime'] ?? '' ?>"
                     data-shared="<?= $a['is_shared'] ? 1 : 0 ?>">
                     <?= htmlspecialchars($a['allocation_title'] ?? 'Allocation') ?>
                     <?= $a['is_shared'] ? ' [Shared]' : '' ?>
@@ -201,6 +225,10 @@ include '../includes/header.php';
                     <div>
                         <span style="color:var(--text-muted)">Period:</span>
                         <strong id="biPeriod">—</strong>
+                    </div>
+                    <div id="biDeadlineWrap" style="display:none;">
+                        <span style="color:var(--text-muted)">Deadline:</span>
+                        <strong id="biDeadline" style="color:var(--danger)">—</strong>
                     </div>
                     <div>
                         <span style="color:var(--text-muted)">Available:</span>
@@ -432,6 +460,17 @@ function updateBudgetInfo(sel) {
 
     document.getElementById('biPeriod').textContent    = opt.dataset.period + ' (' + opt.dataset.start + ' – ' + opt.dataset.end + ')';
     document.getElementById('biRemaining').textContent = fmtCur(currentRemaining);
+
+    const deadlineWrap = document.getElementById('biDeadlineWrap');
+    const deadlineEl   = document.getElementById('biDeadline');
+    if (opt.dataset.enddatetime) {
+        const dl = new Date(opt.dataset.enddatetime.replace(' ', 'T'));
+        deadlineEl.textContent = dl.toLocaleString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'});
+        deadlineWrap.style.display = '';
+    } else {
+        deadlineWrap.style.display = 'none';
+    }
+
     box.style.display = 'block';
 
     recalcTotal();

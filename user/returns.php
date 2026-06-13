@@ -6,16 +6,18 @@ $uid = $_SESSION['user_id'];
 
 $msg = ''; $msgType = '';
 
-// ── Backfill: create missing return_requests for already-approved budget allocations
-// Uses the allocation's own end_datetime (encoder's deadline) if set,
-// otherwise falls back to the budget period's end_date.
+// ── Backfill: generate/update return_requests only for PAST-DUE allocations with excess
+// Rule: return_amount = allocated - used (the actual unspent excess only).
+// If fully consumed (amount_used >= allocated_amount), no return is needed.
+
+// Budget returns — only when past due_datetime AND there is excess
 $conn->query("
     INSERT INTO return_requests
         (return_type, encoder_id, budget_allocation_id, original_purpose,
          return_amount, return_status, due_datetime, created_at)
     SELECT 'budget', ba.encoder_id, ba.id,
            COALESCE(ba.purpose, ba.allocation_title, ''),
-           ba.allocated_amount,
+           (ba.allocated_amount - ba.amount_used),
            'not_yet_returned',
            COALESCE(ba.end_datetime, CONCAT(b.end_date, ' 23:59:59')),
            NOW()
@@ -24,6 +26,8 @@ $conn->query("
     WHERE ba.admin_approval_status = 'approved'
       AND ba.encoder_id = $uid
       AND ba.encoder_id IS NOT NULL
+      AND (ba.allocated_amount - ba.amount_used) > 0.009
+      AND NOW() > COALESCE(ba.end_datetime, CONCAT(b.end_date, ' 23:59:59'))
       AND NOT EXISTS (
           SELECT 1 FROM return_requests rr
           WHERE rr.budget_allocation_id = ba.id
@@ -31,14 +35,27 @@ $conn->query("
       )
 ");
 
-// ── Backfill: create missing return_requests for already-approved inventory assignments
+// Also update existing return rows with the latest excess amount
+// (in case the encoder spent more before the deadline and the excess shrank)
+$conn->query("
+    UPDATE return_requests rr
+    JOIN budget_allocations ba ON rr.budget_allocation_id = ba.id
+    SET rr.return_amount = (ba.allocated_amount - ba.amount_used),
+        rr.updated_at = NOW()
+    WHERE rr.return_type = 'budget'
+      AND rr.encoder_id = $uid
+      AND rr.return_status = 'not_yet_returned'
+      AND (ba.allocated_amount - ba.amount_used) >= 0
+");
+
+// Inventory returns — only when past due AND there is unconsumed quantity
 $conn->query("
     INSERT INTO return_requests
         (return_type, encoder_id, encoder_inventory_id, original_purpose,
          return_quantity, return_status, due_datetime, created_at)
     SELECT 'inventory', ei.encoder_id, ei.id,
            COALESCE(ir.description, ei.item_name, ''),
-           ei.quantity_assigned,
+           (ei.quantity_assigned - ei.quantity_consumed),
            'not_yet_returned',
            ir.end_datetime,
            NOW()
@@ -46,11 +63,25 @@ $conn->query("
     JOIN inventory_requests ir ON ei.inventory_request_id = ir.id
     WHERE ei.encoder_id = $uid
       AND ir.end_datetime IS NOT NULL
+      AND NOW() > ir.end_datetime
+      AND (ei.quantity_assigned - ei.quantity_consumed) > 0
       AND NOT EXISTS (
           SELECT 1 FROM return_requests rr
           WHERE rr.encoder_inventory_id = ei.id
             AND rr.return_type = 'inventory'
       )
+");
+
+// Update inventory return quantity in case consumption changed before deadline
+$conn->query("
+    UPDATE return_requests rr
+    JOIN encoder_inventory ei ON rr.encoder_inventory_id = ei.id
+    SET rr.return_quantity = (ei.quantity_assigned - ei.quantity_consumed),
+        rr.updated_at = NOW()
+    WHERE rr.return_type = 'inventory'
+      AND rr.encoder_id = $uid
+      AND rr.return_status = 'not_yet_returned'
+      AND (ei.quantity_assigned - ei.quantity_consumed) >= 0
 ");
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
