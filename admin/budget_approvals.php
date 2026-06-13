@@ -15,8 +15,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $conn->prepare("UPDATE budget_allocations SET admin_approval_status='approved', admin_approved_by=?, admin_approved_at=NOW(), admin_remarks=? WHERE id=?");
         $stmt->bind_param("isi", $uid, $rmk, $aid);
         $stmt->execute(); $stmt->close();
-        logActivity($conn,'ADMIN_APPROVE_ALLOCATION',"Admin approved budget allocation ID $aid");
-        $msg = 'Allocation approved successfully.'; $msgType = 'success';
+
+        // Auto-create a return_request due at the budget period end_date
+        // so the encoder is prompted to return any unspent balance when the period closes.
+        $alloc = $conn->query("
+            SELECT ba.*, b.end_date, b.period_label,
+                   ba.end_datetime
+            FROM budget_allocations ba
+            JOIN budgets b ON ba.budget_id = b.id
+            WHERE ba.id = $aid
+        ")->fetch_assoc();
+
+        if ($alloc && $alloc['end_date'] && $alloc['encoder_id']) {
+            $encId      = (int)$alloc['encoder_id'];
+            $retAmt     = (float)$alloc['allocated_amount'];
+            $purpose    = $conn->real_escape_string($alloc['purpose'] ?? $alloc['allocation_title'] ?? '');
+            // Prefer the allocation's own end_datetime (encoder's stated deadline);
+            // fall back to the budget period end_date only if not set.
+            $dueDate    = !empty($alloc['end_datetime'])
+                            ? $alloc['end_datetime']
+                            : ($alloc['end_date'] . ' 23:59:59');
+            $dueDateEsc = $conn->real_escape_string($dueDate);
+
+            // Only create if one doesn't already exist for this allocation
+            $existing = $conn->query("
+                SELECT id FROM return_requests
+                WHERE budget_allocation_id = $aid AND return_type = 'budget'
+                LIMIT 1
+            ")->fetch_assoc();
+
+            if (!$existing) {
+                $conn->query("
+                    INSERT INTO return_requests
+                        (return_type, encoder_id, budget_allocation_id, original_purpose,
+                         return_amount, return_status, due_datetime, created_at)
+                    VALUES
+                        ('budget', $encId, $aid, '$purpose',
+                         $retAmt, 'not_yet_returned', '$dueDateEsc', NOW())
+                ");
+            }
+        }
+
+        logActivity($conn,'ADMIN_APPROVE_ALLOCATION',"Admin approved budget allocation ID $aid — return request auto-created");
+        $msg = 'Allocation approved. A return request has been queued for the encoder at period end.';
+        $msgType = 'success';
     }
 
     if ($action === 'reject') {

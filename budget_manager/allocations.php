@@ -11,14 +11,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'create_allocation') {
         $budget_id  = (int)$_POST['budget_id'];
-        $encoder_id = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : null;
+        $encoder_id = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : 0;
         $is_shared  = isset($_POST['is_shared']) ? 1 : 0;
         $title      = trim($_POST['allocation_title']);
         $purpose    = trim($_POST['purpose']);
         $amount     = (float)$_POST['allocated_amount'];
         $date       = date('Y-m-d');
 
-        if ($is_shared) $encoder_id = null;
+        if ($is_shared) $encoder_id = 0;  // 0 means shared/no specific encoder
 
         // Check how much is still available in this specific budget
         $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
@@ -41,15 +41,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      . number_format($budgetRemaining, 2) . ').';
                 $msgType = 'danger';
             } else {
+                // Use direct SQL with safe integer cast; encoder_id=0 means shared (NULL in DB via NULLIF)
                 $stmt = $conn->prepare("
                     INSERT INTO budget_allocations
                         (budget_id, encoder_id, is_shared, allocation_title, purpose,
                          allocated_amount, allocation_date,
                          admin_approval_status, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    VALUES (?, NULLIF(?, 0), ?, ?, ?, ?, ?, 'pending', ?)
                 ");
-                // 8 placeholders: budget_id(i), encoder_id(i), is_shared(i),
-                //                 title(s), purpose(s), amount(d), date(s), created_by(i)
+                // 8 placeholders: all non-null types; NULLIF converts 0 -> NULL for encoder_id
                 $stmt->bind_param("iiissdsi",
                     $budget_id, $encoder_id, $is_shared,
                     $title, $purpose, $amount, $date,

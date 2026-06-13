@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS budget_allocations (
     allocated_amount DECIMAL(12,2) NOT NULL,
     amount_used DECIMAL(12,2) DEFAULT 0,
     allocation_date DATE NOT NULL,
+    end_datetime DATETIME NULL,         -- encoder's stated deadline for using this allocation
     admin_approval_status ENUM('pending','approved','rejected') DEFAULT 'pending',
     admin_approved_by INT NULL,
     admin_approved_at DATETIME NULL,
@@ -279,3 +280,16 @@ INSERT IGNORE INTO inventory (item_name, category, unit, current_stock, minimum_
 ('Eggs', 'Dairy', 'pcs', 120, 24, 9.50),
 ('Soy Sauce', 'Condiments', 'bottle', 6, 2, 35.00),
 ('Vinegar', 'Condiments', 'bottle', 5, 2, 28.00);
+
+-- ── Migration: add end_datetime to budget_allocations if not already present
+ALTER TABLE budget_allocations
+    ADD COLUMN IF NOT EXISTS end_datetime DATETIME NULL
+        COMMENT 'Encoder stated deadline; used as return due date'
+    AFTER allocation_date;
+
+-- ── Migration: backfill end_datetime from linked budget_requests for existing rows
+UPDATE budget_allocations ba
+JOIN budget_requests br ON ba.budget_request_id = br.id
+SET ba.end_datetime = br.end_datetime
+WHERE ba.end_datetime IS NULL
+  AND br.end_datetime IS NOT NULL;

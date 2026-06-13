@@ -6,6 +6,53 @@ $uid = $_SESSION['user_id'];
 
 $msg = ''; $msgType = '';
 
+// ── Backfill: create missing return_requests for already-approved budget allocations
+// Uses the allocation's own end_datetime (encoder's deadline) if set,
+// otherwise falls back to the budget period's end_date.
+$conn->query("
+    INSERT INTO return_requests
+        (return_type, encoder_id, budget_allocation_id, original_purpose,
+         return_amount, return_status, due_datetime, created_at)
+    SELECT 'budget', ba.encoder_id, ba.id,
+           COALESCE(ba.purpose, ba.allocation_title, ''),
+           ba.allocated_amount,
+           'not_yet_returned',
+           COALESCE(ba.end_datetime, CONCAT(b.end_date, ' 23:59:59')),
+           NOW()
+    FROM budget_allocations ba
+    JOIN budgets b ON ba.budget_id = b.id
+    WHERE ba.admin_approval_status = 'approved'
+      AND ba.encoder_id = $uid
+      AND ba.encoder_id IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM return_requests rr
+          WHERE rr.budget_allocation_id = ba.id
+            AND rr.return_type = 'budget'
+      )
+");
+
+// ── Backfill: create missing return_requests for already-approved inventory assignments
+$conn->query("
+    INSERT INTO return_requests
+        (return_type, encoder_id, encoder_inventory_id, original_purpose,
+         return_quantity, return_status, due_datetime, created_at)
+    SELECT 'inventory', ei.encoder_id, ei.id,
+           COALESCE(ir.description, ei.item_name, ''),
+           ei.quantity_assigned,
+           'not_yet_returned',
+           ir.end_datetime,
+           NOW()
+    FROM encoder_inventory ei
+    JOIN inventory_requests ir ON ei.inventory_request_id = ir.id
+    WHERE ei.encoder_id = $uid
+      AND ir.end_datetime IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM return_requests rr
+          WHERE rr.encoder_inventory_id = ei.id
+            AND rr.return_type = 'inventory'
+      )
+");
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -67,7 +114,10 @@ include '../includes/header.php';
                 <td><strong><?= htmlspecialchars($r['return_type']==='budget' ? ($r['allocation_title']??'Budget') : ($r['inv_item_name']??'Item')) ?></strong></td>
                 <td><?= $r['return_type']==='budget' ? formatCurrency($r['return_amount']??0) : ($r['return_quantity'].' '.($r['inv_unit']??'')) ?></td>
                 <td style="font-size:12px;color:var(--text-muted);"><?= htmlspecialchars($r['original_purpose']??'—') ?></td>
-                <td style="font-size:13px;"><?= date('M d, Y H:i', strtotime($r['due_datetime'])) ?></td>
+                <td style="font-size:13px;"><?= date('M d, Y H:i', strtotime($r['due_datetime'])) ?>
+                    <?php if ($r['return_status'] !== 'returned' && strtotime($r['due_datetime']) < time()): ?>
+                    <span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">OVERDUE</span>
+                    <?php endif; ?></td>
                 <td>
                     <span class="badge <?= $r['return_status']==='returned'?'badge-approved':'badge-pending' ?>">
                         <?= $r['return_status']==='returned' ? 'Returned' : 'Not Yet Returned' ?>

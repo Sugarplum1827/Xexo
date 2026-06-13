@@ -106,8 +106,12 @@ include '../includes/header.php';
                 <td>
                     <?php if ($r['status'] === 'pending'): ?>
                     <button class="btn btn-sm btn-primary" onclick='openEdit(<?= json_encode($r) ?>)'><i class="fas fa-edit"></i> Edit</button>
+                    <?php elseif ($r['status'] === 'approved'): ?>
+                    <span style="font-size:12px;color:var(--success);"><i class="fas fa-check-circle"></i> Budget allocated — check My Budget</span>
+                    <?php elseif ($r['status'] === 'rejected'): ?>
+                    <span style="font-size:12px;color:var(--danger);"><i class="fas fa-times-circle"></i> Rejected</span>
                     <?php else: ?>
-                    <span style="font-size:12px;color:var(--text-muted)">Locked</span>
+                    <span style="font-size:12px;color:var(--text-muted)">—</span>
                     <?php endif; ?>
                 </td>
             </tr>
