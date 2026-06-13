@@ -10,8 +10,10 @@ $pendingReqs    = $conn->query("SELECT COUNT(*) c FROM budget_requests WHERE sta
 $todayExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' AND DATE(purchase_date)=CURDATE()")->fetch_assoc()['s'];
 $monthExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' AND MONTH(purchase_date)=MONTH(NOW()) AND YEAR(purchase_date)=YEAR(NOW())")->fetch_assoc()['s'];
 $budgetAmt      = $activeBudget['allocated_amount'] ?? 0;
-$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
-$totalUsed      = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
+$activeBudgetId = $activeBudget['id'] ?? 0;
+// Only count allocations belonging to the active budget period
+$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
+$totalUsed      = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
 $remaining      = $budgetAmt - $totalAllocated;
 $usedPct        = $budgetAmt > 0 ? min(100, ($totalAllocated/$budgetAmt)*100) : 0;
 

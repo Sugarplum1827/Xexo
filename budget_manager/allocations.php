@@ -25,12 +25,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$budget) {
             $msg = 'Selected budget period not found or not approved.'; $msgType = 'danger';
         } else {
-            // Sum allocations already approved against THIS budget only
+            // Sum allocations already approved OR pending against THIS budget to prevent double-booking
             $alreadyAllocated = (float)$conn->query("
                 SELECT COALESCE(SUM(allocated_amount), 0) AS s
                 FROM budget_allocations
                 WHERE budget_id = $budget_id
-                  AND admin_approval_status = 'approved'
+                  AND admin_approval_status IN ('approved','pending')
             ")->fetch_assoc()['s'];
 
             $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
@@ -45,22 +45,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     INSERT INTO budget_allocations
                         (budget_id, encoder_id, is_shared, allocation_title, purpose,
                          allocated_amount, allocation_date,
-                         admin_approval_status, admin_approved_by, admin_approved_at, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, NOW(), ?)
+                         admin_approval_status, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 ");
-                // 9 placeholders: budget_id(i), encoder_id(i), is_shared(i),
-                //                 title(s), purpose(s), amount(d), date(s),
-                //                 admin_approved_by(i), created_by(i)
-                $stmt->bind_param("iiissdsii",
+                // 8 placeholders: budget_id(i), encoder_id(i), is_shared(i),
+                //                 title(s), purpose(s), amount(d), date(s), created_by(i)
+                $stmt->bind_param("iiissdsi",
                     $budget_id, $encoder_id, $is_shared,
                     $title, $purpose, $amount, $date,
-                    $uid, $uid);
+                    $uid);
                 $stmt->execute(); $stmt->close();
 
                 logActivity($conn, 'CREATE_ALLOCATION',
-                    "Allocated ₱$amount from budget #$budget_id: $title");
-                $msg = 'Allocation created. ₱' . number_format($amount, 2)
-                     . ' is now available to the encoder immediately.';
+                    "Submitted allocation request ₱$amount from budget #$budget_id: $title (pending admin approval)");
+                $msg = 'Allocation submitted for Admin approval. ₱' . number_format($amount, 2)
+                     . ' will be available to the encoder once approved.';
                 $msgType = 'success';
             }
         }
@@ -71,7 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $budgets = $conn->query("
     SELECT b.*,
            COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.allocated_amount ELSE 0 END), 0) AS total_allocated,
-           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.amount_used ELSE 0 END), 0)      AS total_used
+           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.amount_used ELSE 0 END), 0)      AS total_used,
+           COALESCE(SUM(CASE WHEN ba.admin_approval_status IN ('approved','pending') THEN ba.allocated_amount ELSE 0 END), 0) AS total_committed
     FROM budgets b
     LEFT JOIN budget_allocations ba ON ba.budget_id = b.id
     WHERE b.approval_status = 'approved'
@@ -79,9 +79,9 @@ $budgets = $conn->query("
     ORDER BY b.id DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
-// Add computed remaining per budget
+// Add computed remaining per budget (deducting both approved and pending to prevent overbooking)
 foreach ($budgets as &$b) {
-    $b['budget_remaining'] = $b['allocated_amount'] - $b['total_allocated'];
+    $b['budget_remaining'] = $b['allocated_amount'] - $b['total_committed'];
 }
 unset($b);
 
@@ -225,8 +225,8 @@ include '../includes/header.php';
                 </div>
             </div>
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-                <i class="fas fa-check-circle" style="color:var(--success)"></i>
-                Allocations are <strong>immediately available</strong> to the encoder — no extra Admin approval needed.
+                <i class="fas fa-info-circle" style="color:var(--warning)"></i>
+                Allocations require <strong>Admin approval</strong> before they become available to the encoder.
             </p>
             <button type="submit" class="btn btn-gold" style="width:100%">
                 <i class="fas fa-plus"></i> Create Allocation

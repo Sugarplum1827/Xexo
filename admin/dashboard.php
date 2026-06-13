@@ -9,8 +9,8 @@ $pendingPurchases  = $conn->query("SELECT COUNT(*) c FROM purchases WHERE status
 $pendingBudgets    = $conn->query("SELECT COUNT(*) c FROM budgets WHERE approval_status='pending'")->fetch_assoc()['c'];
 $pendingAllocations= $conn->query("SELECT COUNT(*) c FROM budget_allocations WHERE admin_approval_status='pending'")->fetch_assoc()['c'];
 $activeBudget      = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' ORDER BY id DESC LIMIT 1")->fetch_assoc();
-$totalAllocated    = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
-$totalUsed         = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
+$totalAllocated    = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=" . (int)($activeBudget['id'] ?? 0))->fetch_assoc()['s'];
+$totalUsed         = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=" . (int)($activeBudget['id'] ?? 0))->fetch_assoc()['s'];
 $budgetAmt         = $activeBudget['allocated_amount'] ?? 0;
 $remaining         = $budgetAmt - $totalAllocated;
 $usedPct           = $budgetAmt > 0 ? min(100, ($totalAllocated/$budgetAmt)*100) : 0;

@@ -18,8 +18,12 @@ $budgets     = $conn->query("SELECT * FROM budgets ORDER BY id DESC")->fetch_all
 $byCategory  = $conn->query("SELECT supplier, COUNT(*) cnt, SUM(total_price) total FROM purchases WHERE status='approved' $whereDate AND supplier IS NOT NULL GROUP BY supplier ORDER BY total DESC")->fetch_all(MYSQLI_ASSOC);
 $monthlyTrend= $conn->query("SELECT MONTH(purchase_date) m, SUM(total_price) total FROM purchases WHERE status='approved' AND YEAR(purchase_date)=$year GROUP BY MONTH(purchase_date) ORDER BY m")->fetch_all(MYSQLI_ASSOC);
 $activeBudget= $conn->query("SELECT * FROM budgets WHERE is_active=1 LIMIT 1")->fetch_assoc();
+$activeBudgetId = $activeBudget['id'] ?? 0;
+// Total allocated amount for the active budget (approved allocations only)
+$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
 $budgetAmt   = $activeBudget['allocated_amount'] ?? 0;
-$usedPct     = $budgetAmt > 0 ? min(100, ($stats['amount']/$budgetAmt)*100) : 0;
+$remaining   = $totalAllocated - $stats['amount'];
+$usedPct     = $totalAllocated > 0 ? min(100, ($stats['amount']/$totalAllocated)*100) : 0;
 
 include '../includes/header.php';
 ?>
@@ -50,9 +54,9 @@ include '../includes/header.php';
 </div>
 
 <div class="stats-grid" style="margin-bottom:24px;">
-    <div class="stat-card"><div class="stat-icon gold"><i class="fas fa-wallet"></i></div><div><div class="stat-value"><?= formatCurrency($budgetAmt) ?></div><div class="stat-label">Allocated</div></div></div>
+    <div class="stat-card"><div class="stat-icon gold"><i class="fas fa-wallet"></i></div><div><div class="stat-value"><?= formatCurrency($totalAllocated) ?></div><div class="stat-label">Allocated</div></div></div>
     <div class="stat-card"><div class="stat-icon red"><i class="fas fa-money-bill-wave"></i></div><div><div class="stat-value"><?= formatCurrency($stats['amount']) ?></div><div class="stat-label">Total Spent</div></div></div>
-    <div class="stat-card"><div class="stat-icon green"><i class="fas fa-piggy-bank"></i></div><div><div class="stat-value"><?= formatCurrency($budgetAmt - $stats['amount']) ?></div><div class="stat-label">Remaining</div></div></div>
+    <div class="stat-card"><div class="stat-icon green"><i class="fas fa-piggy-bank"></i></div><div><div class="stat-value"><?= formatCurrency($remaining) ?></div><div class="stat-label">Remaining</div></div></div>
     <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-percent"></i></div><div><div class="stat-value"><?= number_format($usedPct,1) ?>%</div><div class="stat-label">Utilization</div></div></div>
 </div>
 
