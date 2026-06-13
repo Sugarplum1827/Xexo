@@ -4,89 +4,106 @@ requireRole('user', '../index.php');
 $pageTitle = 'My Budget';
 $uid = $_SESSION['user_id'];
 
-$msg = ''; $msgType = '';
-
-// Handle budget consumption
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'consume') {
-    $alloc_id = (int)$_POST['allocation_id'];
-    $amount   = (float)$_POST['amount_spent'];
-    $desc     = trim($_POST['description']);
-    // Verify allocation belongs to this encoder (or is shared+approved)
-    $alloc = $conn->query("SELECT * FROM budget_allocations WHERE id=$alloc_id AND admin_approval_status='approved' AND (encoder_id=$uid OR is_shared=1)")->fetch_assoc();
-    if ($alloc) {
-        $remaining = $alloc['allocated_amount'] - $alloc['amount_used'];
-        if ($amount > $remaining) {
-            $msg = 'Amount exceeds remaining allocated budget.'; $msgType = 'danger';
-        } else {
-            $stmt = $conn->prepare("INSERT INTO budget_consumption_log (budget_allocation_id, encoder_id, amount_spent, description, spent_at) VALUES (?,?,?,?,NOW())");
-            $stmt->bind_param("iids", $alloc_id, $uid, $amount, $desc);
-            $stmt->execute(); $stmt->close();
-            $conn->query("UPDATE budget_allocations SET amount_used=amount_used+$amount WHERE id=$alloc_id");
-            logActivity($conn, 'CONSUME_BUDGET', "Spent ₱$amount from allocation ID $alloc_id: $desc");
-            $msg = 'Budget consumption recorded.'; $msgType = 'success';
-        }
-    } else {
-        $msg = 'Invalid or unauthorized allocation.'; $msgType = 'danger';
-    }
-}
-
-// My approved allocations (personal + shared)
+// My approved allocations (personal + shared) — read-only view
 $allocations = $conn->query("
     SELECT ba.*, b.period_label, u.full_name AS created_by_name
     FROM budget_allocations ba
     JOIN budgets b ON ba.budget_id = b.id
     JOIN users u ON ba.created_by = u.id
-    WHERE ba.admin_approval_status='approved'
-      AND (ba.encoder_id=$uid OR ba.is_shared=1)
+    WHERE ba.admin_approval_status = 'approved'
+      AND (ba.encoder_id = $uid OR ba.is_shared = 1)
     ORDER BY ba.allocation_date DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
-// My consumption logs
-$logs = $conn->query("
-    SELECT bcl.*, ba.allocation_title
-    FROM budget_consumption_log bcl
-    JOIN budget_allocations ba ON bcl.budget_allocation_id = ba.id
-    WHERE bcl.encoder_id=$uid
-    ORDER BY bcl.spent_at DESC LIMIT 30
+// Purchase history that charged these allocations
+$purchases = $conn->query("
+    SELECT p.*, ba.allocation_title
+    FROM purchases p
+    LEFT JOIN budget_allocations ba ON p.allocation_id = ba.id
+    WHERE p.submitted_by = $uid
+    ORDER BY p.created_at DESC
+    LIMIT 50
 ")->fetch_all(MYSQLI_ASSOC);
 
 include '../includes/header.php';
 ?>
-<?php if ($msg): ?><div class="alert alert-<?= $msgType ?>"><i class="fas fa-<?= $msgType==='success'?'check-circle':'exclamation-circle' ?>"></i> <?= htmlspecialchars($msg) ?></div><?php endif; ?>
 
-<!-- Allocated Budgets -->
+<!-- My Allocated Budgets -->
 <div class="card" style="margin-bottom:24px;">
     <div class="card-header">
         <span class="card-title">My Allocated Budgets</span>
-        <a href="budget_requests.php" class="btn btn-gold btn-sm"><i class="fas fa-plus"></i> Request Budget</a>
+        <a href="budget_requests.php" class="btn btn-gold btn-sm">
+            <i class="fas fa-hand-holding-usd"></i> Request Budget
+        </a>
     </div>
+
     <?php if (empty($allocations)): ?>
-    <div style="text-align:center;padding:40px;color:var(--text-muted);">No budgets allocated yet.</div>
+    <div style="text-align:center;padding:48px;color:var(--text-muted);">
+        <i class="fas fa-wallet" style="font-size:36px;margin-bottom:12px;display:block;"></i>
+        <strong>No budgets allocated yet.</strong>
+        <p style="font-size:13px;margin-top:6px;">
+            Request a budget from the Budget Manager to get started.
+        </p>
+        <a href="budget_requests.php" class="btn btn-gold" style="margin-top:12px;">
+            <i class="fas fa-plus"></i> Request Budget
+        </a>
+    </div>
+
     <?php else: ?>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>#</th><th>Title</th><th>Period</th><th>Type</th><th>Allocated</th><th>Used</th><th>Remaining</th><th>Date</th><th>Action</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Title</th>
+                    <th>Budget Period</th>
+                    <th>Type</th>
+                    <th>Allocated</th>
+                    <th>Used</th>
+                    <th>Remaining</th>
+                    <th>Utilization</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
             <tbody>
             <?php foreach ($allocations as $i => $a):
                 $remaining = $a['allocated_amount'] - $a['amount_used'];
-                $pct = $a['allocated_amount'] > 0 ? min(100, ($a['amount_used']/$a['allocated_amount'])*100) : 0;
+                $pct = $a['allocated_amount'] > 0
+                    ? min(100, ($a['amount_used'] / $a['allocated_amount']) * 100)
+                    : 0;
             ?>
             <tr>
-                <td><?= $i+1 ?></td>
-                <td><strong><?= htmlspecialchars($a['allocation_title']??'—') ?></strong><?php if($a['is_shared']): ?> <span class="badge badge-pending" style="font-size:10px;">Shared</span><?php endif; ?></td>
-                <td style="font-size:12px;"><?= htmlspecialchars($a['period_label']) ?></td>
-                <td><span class="badge <?= $a['is_shared']?'badge-pending':'badge-approved' ?>"><?= $a['is_shared']?'Shared':'Personal' ?></span></td>
-                <td><?= formatCurrency($a['allocated_amount']) ?></td>
-                <td><?= formatCurrency($a['amount_used']) ?></td>
-                <td style="color:<?= $remaining>0?'var(--success)':'var(--danger)' ?>;font-weight:700;"><?= formatCurrency($remaining) ?></td>
-                <td style="font-size:12px;"><?= $a['allocation_date'] ?></td>
+                <td><?= $i + 1 ?></td>
                 <td>
-                    <?php if ($remaining > 0): ?>
-                    <button class="btn btn-sm btn-gold" onclick="openConsume(<?= $a['id'] ?>, '<?= htmlspecialchars(addslashes($a['allocation_title']??'')) ?>', <?= $remaining ?>)"><i class="fas fa-minus-circle"></i> Use</button>
-                    <?php else: ?>
-                    <span style="font-size:12px;color:var(--text-muted)">Depleted</span>
+                    <strong><?= htmlspecialchars($a['allocation_title'] ?? '—') ?></strong>
+                    <?php if ($a['is_shared']): ?>
+                    <span class="badge badge-pending" style="font-size:10px;margin-left:4px;">Shared</span>
+                    <?php endif; ?>
+                    <?php if ($a['purpose']): ?>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                        <?= htmlspecialchars($a['purpose']) ?>
+                    </div>
                     <?php endif; ?>
                 </td>
+                <td style="font-size:12px;"><?= htmlspecialchars($a['period_label']) ?></td>
+                <td>
+                    <span class="badge <?= $a['is_shared'] ? 'badge-pending' : 'badge-approved' ?>">
+                        <?= $a['is_shared'] ? 'Shared' : 'Personal' ?>
+                    </span>
+                </td>
+                <td><strong><?= formatCurrency($a['allocated_amount']) ?></strong></td>
+                <td style="color:var(--danger);font-weight:600;"><?= formatCurrency($a['amount_used']) ?></td>
+                <td style="font-weight:700;color:<?= $remaining > 0 ? 'var(--success)' : 'var(--danger)' ?>;">
+                    <?= formatCurrency($remaining) ?>
+                </td>
+                <td style="min-width:120px;">
+                    <div class="progress-bar" style="height:7px;margin-bottom:3px;">
+                        <div class="progress-fill <?= $pct >= 90 ? 'red' : ($pct >= 70 ? 'orange' : 'green') ?>"
+                             style="width:<?= $pct ?>%"></div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);"><?= number_format($pct, 1) ?>% used</div>
+                </td>
+                <td style="font-size:12px;color:var(--text-muted);"><?= $a['allocation_date'] ?></td>
             </tr>
             <?php endforeach; ?>
             </tbody>
@@ -95,59 +112,66 @@ include '../includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- Consumption History -->
+<!-- Budget Consumption Log (from purchases) -->
 <div class="card">
-    <div class="card-header"><span class="card-title">My Budget Consumption Log</span></div>
+    <div class="card-header">
+        <span class="card-title">My Budget Consumption Log</span>
+        <a href="submit_purchase.php" class="btn btn-gold btn-sm">
+            <i class="fas fa-plus"></i> New Purchase
+        </a>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+        Budget is consumed through purchases submitted via the
+        <a href="submit_purchase.php" style="color:var(--primary);font-weight:600;">Submit Purchase</a> page.
+    </p>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>#</th><th>Allocation</th><th>Amount Spent</th><th>Description</th><th>Date</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Item</th>
+                    <th>Allocation Used</th>
+                    <th>Qty</th>
+                    <th>Unit Price</th>
+                    <th>Total Spent</th>
+                    <th>Supplier</th>
+                    <th>Purchase Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
             <tbody>
-            <?php foreach ($logs as $i => $l): ?>
+            <?php foreach ($purchases as $i => $p): ?>
             <tr>
-                <td><?= $i+1 ?></td>
-                <td><?= htmlspecialchars($l['allocation_title']??'—') ?></td>
-                <td><strong><?= formatCurrency($l['amount_spent']) ?></strong></td>
-                <td style="font-size:13px;"><?= htmlspecialchars($l['description']??'—') ?></td>
-                <td style="font-size:12px;color:var(--text-muted);"><?= date('M d, Y H:i', strtotime($l['spent_at'])) ?></td>
+                <td><?= $i + 1 ?></td>
+                <td><strong><?= htmlspecialchars($p['item_name']) ?></strong></td>
+                <td style="font-size:12px;color:var(--text-muted);">
+                    <?= htmlspecialchars($p['allocation_title'] ?? '—') ?>
+                </td>
+                <td><?= $p['quantity'] ?> <?= htmlspecialchars($p['unit']) ?></td>
+                <td><?= formatCurrency($p['unit_price']) ?></td>
+                <td><strong><?= formatCurrency($p['total_price']) ?></strong></td>
+                <td style="font-size:12px;"><?= htmlspecialchars($p['supplier'] ?? '—') ?></td>
+                <td style="font-size:12px;"><?= $p['purchase_date'] ?></td>
+                <td>
+                    <span class="badge badge-<?= $p['status'] === 'approved' ? 'approved' : ($p['status'] === 'rejected' ? 'rejected' : 'pending') ?>">
+                        <?= ucfirst(str_replace('_', ' ', $p['status'])) ?>
+                    </span>
+                </td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($logs)): ?><tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No consumption records yet.</td></tr><?php endif; ?>
+            <?php if (empty($purchases)): ?>
+            <tr>
+                <td colspan="9" style="text-align:center;color:var(--text-muted);padding:32px;">
+                    No purchases yet.
+                    <a href="submit_purchase.php" style="color:var(--primary);font-weight:600;margin-left:6px;">
+                        Submit your first purchase →
+                    </a>
+                </td>
+            </tr>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- Consume Modal -->
-<div class="modal-overlay" id="consumeModal">
-    <div class="modal">
-        <div class="modal-header">
-            <span class="modal-title">Record Budget Usage</span>
-            <button class="modal-close" onclick="document.getElementById('consumeModal').classList.remove('open')">&times;</button>
-        </div>
-        <form method="POST">
-            <input type="hidden" name="action" value="consume">
-            <input type="hidden" name="allocation_id" id="consumeAllocId">
-            <p id="consumeInfo" style="font-size:13px;color:var(--text-muted);margin-bottom:16px;"></p>
-            <div class="form-group">
-                <label>Amount to Spend (₱) *</label>
-                <input type="number" name="amount_spent" id="consumeAmt" class="form-control" step="0.01" min="0.01" required placeholder="0.00">
-            </div>
-            <div class="form-group">
-                <label>Description *</label>
-                <input type="text" name="description" class="form-control" required placeholder="What was this spent on?">
-            </div>
-            <button type="submit" class="btn btn-gold" style="width:100%"><i class="fas fa-check"></i> Confirm</button>
-        </form>
-    </div>
-</div>
-
-<script>
-function openConsume(id, title, remaining) {
-    document.getElementById('consumeAllocId').value = id;
-    document.getElementById('consumeInfo').textContent = 'Allocation: ' + title + ' | Remaining: ₱' + parseFloat(remaining).toLocaleString('en-PH', {minimumFractionDigits:2});
-    document.getElementById('consumeAmt').max = remaining;
-    document.getElementById('consumeModal').classList.add('open');
-}
-document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('open'); }));
-</script>
 <?php include '../includes/footer.php'; ?>
