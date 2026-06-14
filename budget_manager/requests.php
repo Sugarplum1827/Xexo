@@ -89,11 +89,12 @@ $requests = $conn->query("
     ORDER BY br.created_at DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
-$activeBudgets = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' ORDER BY id DESC")->fetch_all(MYSQLI_ASSOC);
+$activeBudgets = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' AND end_date >= CURDATE() ORDER BY id DESC")->fetch_all(MYSQLI_ASSOC);
 
-// Remaining budget available for allocation
-$totalApproved  = $activeBudgets[0]['allocated_amount'] ?? 0;
-$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
+// Remaining budget available for allocation — scoped to the active budget only
+$activeBudgetId    = $activeBudgets[0]['id'] ?? 0;
+$totalApproved     = $activeBudgets[0]['allocated_amount'] ?? 0;
+$totalAllocated    = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
 $availableForAlloc = $totalApproved - $totalAllocated;
 
 include '../includes/header.php';

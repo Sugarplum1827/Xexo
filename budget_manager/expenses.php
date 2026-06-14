@@ -16,7 +16,7 @@ $whereDate = match($period) {
 };
 
 $totalExp  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' $whereDate")->fetch_assoc()['s'];
-$budget    = $conn->query("SELECT allocated_amount FROM budgets WHERE is_active=1 LIMIT 1")->fetch_assoc();
+$budget    = $conn->query("SELECT allocated_amount FROM budgets WHERE is_active=1 AND approval_status='approved' LIMIT 1")->fetch_assoc();
 $budgetAmt = $budget['allocated_amount'] ?? 0;
 $remaining = $budgetAmt - $totalExp;
 $expenses  = $conn->query("SELECT p.*, u.full_name FROM purchases p LEFT JOIN users u ON p.submitted_by=u.id WHERE p.status='approved' $whereDate ORDER BY p.purchase_date DESC")->fetch_all(MYSQLI_ASSOC);

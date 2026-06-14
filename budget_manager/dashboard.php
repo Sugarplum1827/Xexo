@@ -3,15 +3,16 @@ require_once '../includes/auth.php';
 requireRole('budget_manager', '../index.php');
 $pageTitle = 'Budget Dashboard';
 
-$activeBudget   = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+$activeBudget   = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' AND end_date >= CURDATE() ORDER BY id DESC LIMIT 1")->fetch_assoc();
 $totalApproved  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved'")->fetch_assoc()['s'];
 $pendingCount   = $conn->query("SELECT COUNT(*) c FROM purchases WHERE status='pending'")->fetch_assoc()['c'];
 $pendingReqs    = $conn->query("SELECT COUNT(*) c FROM budget_requests WHERE status='pending'")->fetch_assoc()['c'];
 $todayExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' AND DATE(purchase_date)=CURDATE()")->fetch_assoc()['s'];
 $monthExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' AND MONTH(purchase_date)=MONTH(NOW()) AND YEAR(purchase_date)=YEAR(NOW())")->fetch_assoc()['s'];
+$activeBudgetId = $activeBudget['id'] ?? 0;
 $budgetAmt      = $activeBudget['allocated_amount'] ?? 0;
-$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
-$totalUsed      = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved'")->fetch_assoc()['s'];
+$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
+$totalUsed      = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
 $remaining      = $budgetAmt - $totalAllocated;
 $usedPct        = $budgetAmt > 0 ? min(100, ($totalAllocated/$budgetAmt)*100) : 0;
 

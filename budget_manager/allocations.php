@@ -87,19 +87,22 @@ foreach ($budgets as &$b) {
 }
 unset($b);
 
-$activeBudgets = array_filter($budgets, fn($b) => $b['is_active'] == 1);
+$activeBudgets = array_filter($budgets, fn($b) => $b['is_active'] == 1 && $b['end_date'] >= date('Y-m-d'));
 $activeBudgets = array_values($activeBudgets);
 
-// All allocations with encoder + budget info
+// All allocations with encoder + budget info + return status
 $allocations = $conn->query("
     SELECT ba.*,
            b.period_label, b.start_date, b.end_date,
            u.full_name  AS encoder_name,
-           cr.full_name AS created_by_name
+           cr.full_name AS created_by_name,
+           rr.return_status,
+           rr.verified_at
     FROM budget_allocations ba
     JOIN budgets b  ON ba.budget_id  = b.id
     LEFT JOIN users u  ON ba.encoder_id  = u.id
     LEFT JOIN users cr ON ba.created_by  = cr.id
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type = 'budget'
     ORDER BY ba.created_at DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
@@ -271,9 +274,15 @@ include '../includes/header.php';
                 <?= $a['is_shared'] ? '<i class="fas fa-users"></i> All Encoders' : htmlspecialchars($a['encoder_name'] ?? '—') ?>
             </div>
             <?php if ($a['end_datetime']): ?>
-            <div style="font-size:12px;margin-bottom:6px;color:<?= strtotime($a['end_datetime'])<=time()?'var(--danger)':'var(--text-muted)' ?>;">
+            <?php
+                $isExpired  = strtotime($a['end_datetime']) <= time();
+                $isReturned = $a['return_status'] === 'returned';
+            ?>
+            <div style="font-size:12px;margin-bottom:6px;color:<?= $isExpired ? 'var(--danger)' : 'var(--text-muted)' ?>;">
                 <i class="fas fa-clock"></i> Access ends: <?= date('M d, Y H:i', strtotime($a['end_datetime'])) ?>
-                <?php if (strtotime($a['end_datetime']) <= time()): ?>
+                <?php if ($isReturned): ?>
+                <span class="badge badge-approved" style="font-size:10px;margin-left:4px;">RETURNED</span>
+                <?php elseif ($isExpired): ?>
                 <span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">EXPIRED</span>
                 <?php endif; ?>
             </div>

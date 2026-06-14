@@ -12,13 +12,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $uid    = $_SESSION['user_id'];
 
     if ($action === 'approve') {
-        // Deactivate all current active budgets first
-        $conn->query("UPDATE budgets SET is_active=0 WHERE is_active=1");
+        // Log & deactivate any currently active budget before switching
+        $prevActive = $conn->query("SELECT id, period_label FROM budgets WHERE is_active=1 LIMIT 1")->fetch_assoc();
+        if ($prevActive && $prevActive['id'] != $bid) {
+            $conn->query("UPDATE budgets SET is_active=0 WHERE is_active=1");
+            logActivity($conn, 'ADMIN_DEACTIVATE_BUDGET',
+                "Auto-deactivated budget period \"{$prevActive['period_label']}\" (ID {$prevActive['id']}) when approving new period ID $bid");
+        }
         $stmt = $conn->prepare("UPDATE budgets SET approval_status='approved', is_active=1, approved_by=?, approved_at=NOW() WHERE id=?");
         $stmt->bind_param("ii", $uid, $bid);
         $stmt->execute(); $stmt->close();
         logActivity($conn, 'ADMIN_APPROVE_BUDGET', "Admin approved budget period ID $bid");
-        $msg = 'Budget approved and activated.'; $msgType = 'success';
+        $prevNote = $prevActive && $prevActive['id'] != $bid
+            ? " Previous active budget <strong>\"{$prevActive['period_label']}\"</strong> has been deactivated."
+            : '';
+        $msg = 'Budget approved and activated.' . $prevNote; $msgType = 'success';
     }
 
     if ($action === 'reject') {
@@ -77,7 +85,7 @@ include '../includes/header.php';
                 <td style="font-size:12px;color:var(--danger);max-width:160px;"><?= htmlspecialchars($b['rejection_reason']??'—') ?></td>
                 <td>
                     <?php if ($b['approval_status'] === 'pending'): ?>
-                    <button class="btn btn-sm btn-success" onclick="openDecision(<?= $b['id'] ?>, 'approve')"><i class="fas fa-check"></i></button>
+                    <button class="btn btn-sm btn-success" onclick="openDecision(<?= $b['id'] ?>, 'approve', <?= json_encode($b['period_label']) ?>, <?= $b['allocated_amount'] ?>)"><i class="fas fa-check"></i></button>
                     <button class="btn btn-sm btn-danger" onclick="openDecision(<?= $b['id'] ?>, 'reject')"><i class="fas fa-times"></i></button>
                     <?php else: ?>
                     <span style="font-size:12px;color:var(--text-muted);">Done</span>
@@ -101,6 +109,7 @@ include '../includes/header.php';
         <form method="POST">
             <input type="hidden" name="budget_id" id="decisionBid">
             <input type="hidden" name="action" id="decisionAction">
+            <div id="activeWarning" class="alert alert-warning" style="display:none;margin-bottom:14px;font-size:13px;"></div>
             <div class="form-group">
                 <label id="rmkLabel">Remarks / Reason</label>
                 <textarea name="remarks" id="rmkField" class="form-control" rows="3" placeholder="Optional remarks..."></textarea>
@@ -111,7 +120,13 @@ include '../includes/header.php';
 </div>
 
 <script>
-function openDecision(id, action) {
+// Pass currently active budget to JS so the modal can warn the admin
+const activeBudget = <?= json_encode(
+    $conn->query("SELECT id, period_label, allocated_amount FROM budgets WHERE is_active=1 AND approval_status='approved' LIMIT 1")->fetch_assoc()
+    ?? null
+) ?>;
+
+function openDecision(id, action, label, amount) {
     document.getElementById('decisionBid').value = id;
     document.getElementById('decisionAction').value = action;
     document.getElementById('decisionTitle').textContent = action === 'approve' ? 'Approve Budget Proposal' : 'Reject Budget Proposal';
@@ -121,6 +136,16 @@ function openDecision(id, action) {
     const btn = document.getElementById('decisionBtn');
     btn.className = 'btn ' + (action==='approve'?'btn-success':'btn-danger');
     btn.innerHTML = '<i class="fas fa-' + (action==='approve'?'check':'times') + '"></i> ' + (action==='approve'?'Approve':'Reject');
+
+    // Show deactivation warning only when approving and another budget is currently active
+    const warn = document.getElementById('activeWarning');
+    if (action === 'approve' && activeBudget && activeBudget.id != id) {
+        warn.style.display = 'block';
+        warn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> Approving this will deactivate the current active budget: <strong>"' + activeBudget.period_label + '"</strong> (₱' + parseFloat(activeBudget.allocated_amount).toLocaleString('en-PH',{minimumFractionDigits:2}) + '). Any encoders using it will lose access immediately.';
+    } else {
+        warn.style.display = 'none';
+    }
+
     document.getElementById('decisionModal').classList.add('open');
 }
 document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('open'); }));
