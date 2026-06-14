@@ -1,6 +1,11 @@
 <?php
 $role = $_SESSION['role'] ?? '';
 $name = $_SESSION['full_name'] ?? 'User';
+
+// Auto-generate return requests for any expired allocations or inventory
+require_once __DIR__ . '/check_returns.php';
+if (isset($conn)) autoGenerateReturnRequests($conn);
+
 $roleLabel = [
     'admin' => 'System Administrator',
     'budget_manager' => 'Budget Manager',

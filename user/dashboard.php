@@ -20,6 +20,7 @@ $myAllocations = $conn->query("
             (ba.is_shared = 0 AND ba.encoder_id = $uid)
          OR (ba.is_shared = 1)
       )
+      AND (ba.end_datetime IS NULL OR ba.end_datetime > NOW())
     ORDER BY ba.is_shared ASC, ba.allocation_date DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
