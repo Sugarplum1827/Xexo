@@ -42,40 +42,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $title   = $conn->real_escape_string($req['request_title']);
                 $purpose = $conn->real_escape_string($req['description'] ?? '');
                 $date    = date('Y-m-d');
-                $endDatetime = $conn->real_escape_string($req['end_datetime']);
                 $conn->query("
                     INSERT INTO budget_allocations
                         (budget_id, budget_request_id, encoder_id, is_shared,
                          allocation_title, purpose, allocated_amount, allocation_date,
-                         end_datetime,
                          admin_approval_status, admin_approved_by, admin_approved_at, created_by)
                     VALUES
                         ($budget_id, $rid, $enc_id, 0,
                          '$title', '$purpose', $alloc_amount, '$date',
-                         '$endDatetime',
                          'approved', $uid, NOW(), $uid)
                 ");
 
-                // Auto-create return_request due at the request's own end_datetime
-                // so the encoder is prompted to return unspent balance when their usage period ends.
-                $alloc_id  = $conn->insert_id;
-                $dueDate   = $conn->real_escape_string($req['end_datetime']);
-                $purposeEsc= $conn->real_escape_string($req['description'] ?? $req['request_title'] ?? '');
-                $conn->query("
-                    INSERT INTO return_requests
-                        (return_type, encoder_id, budget_allocation_id, original_purpose,
-                         return_amount, return_status, due_datetime, created_at)
-                    VALUES
-                        ('budget', $enc_id, $alloc_id, '$purposeEsc',
-                         $alloc_amount, 'not_yet_returned', '$dueDate', NOW())
-                ");
-
                 logActivity($conn, 'APPROVE_BUDGET_REQUEST',
-                    "Approved request #$rid — ₱$alloc_amount from budget #$budget_id to encoder #$enc_id — return request created");
+                    "Approved request #$rid — ₱$alloc_amount from budget #$budget_id to encoder #$enc_id");
                 $msg = 'Request approved. ₱' . number_format($alloc_amount, 2)
                      . ' is now immediately available to the encoder from "'
-                     . htmlspecialchars($budget['period_label']) . '".'
-                     . ' A return request has been scheduled for ' . date('M d, Y H:i', strtotime($req['end_datetime'])) . '.';
+                     . htmlspecialchars($budget['period_label']) . '".';
                 $msgType = 'success';
             }
         } else {

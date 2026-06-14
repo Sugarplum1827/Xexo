@@ -11,8 +11,11 @@ $allocations = $conn->query("
     JOIN budgets b ON ba.budget_id = b.id
     JOIN users u ON ba.created_by = u.id
     WHERE ba.admin_approval_status = 'approved'
-      AND (ba.encoder_id = $uid OR ba.is_shared = 1)
-    ORDER BY ba.allocation_date DESC
+      AND (
+            (ba.is_shared = 0 AND ba.encoder_id = $uid)
+         OR (ba.is_shared = 1)
+      )
+    ORDER BY ba.is_shared ASC, ba.allocation_date DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
 // Purchase history that charged these allocations
@@ -62,19 +65,17 @@ include '../includes/header.php';
                     <th>Used</th>
                     <th>Remaining</th>
                     <th>Utilization</th>
-                    <th>Deadline</th>
                     <th>Date</th>
                 </tr>
             </thead>
             <tbody>
             <?php foreach ($allocations as $i => $a):
-                $remaining  = $a['allocated_amount'] - $a['amount_used'];
-                $pct        = $a['allocated_amount'] > 0
+                $remaining = $a['allocated_amount'] - $a['amount_used'];
+                $pct = $a['allocated_amount'] > 0
                     ? min(100, ($a['amount_used'] / $a['allocated_amount']) * 100)
                     : 0;
-                $isExpired  = !empty($a['end_datetime']) && strtotime($a['end_datetime']) < time();
             ?>
-            <tr style="<?= $isExpired ? 'opacity:.6;background:rgba(185,28,28,.04);' : '' ?>">
+            <tr>
                 <td><?= $i + 1 ?></td>
                 <td>
                     <strong><?= htmlspecialchars($a['allocation_title'] ?? '—') ?></strong>
@@ -104,16 +105,6 @@ include '../includes/header.php';
                              style="width:<?= $pct ?>%"></div>
                     </div>
                     <div style="font-size:11px;color:var(--text-muted);"><?= number_format($pct, 1) ?>% used</div>
-                </td>
-                <td style="font-size:12px;">
-                    <?php if (!empty($a['end_datetime'])): ?>
-                    <span style="color:<?= $isExpired ? 'var(--danger)' : 'var(--text)' ?>;font-weight:<?= $isExpired ? '700' : '400' ?>;">
-                        <?= date('M d, Y H:i', strtotime($a['end_datetime'])) ?>
-                        <?php if ($isExpired): ?><span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">EXPIRED</span><?php endif; ?>
-                    </span>
-                    <?php else: ?>
-                    <span style="color:var(--text-muted);">—</span>
-                    <?php endif; ?>
                 </td>
                 <td style="font-size:12px;color:var(--text-muted);"><?= $a['allocation_date'] ?></td>
             </tr>

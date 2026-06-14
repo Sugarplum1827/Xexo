@@ -10,29 +10,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $uid    = $_SESSION['user_id'];
 
     if ($action === 'create_allocation') {
-        $budget_id    = (int)$_POST['budget_id'];
-        $encoder_id   = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : 0;
-        $is_shared    = isset($_POST['is_shared']) ? 1 : 0;
-        $title        = trim($_POST['allocation_title']);
-        $purpose      = trim($_POST['purpose']);
-        $amount       = (float)$_POST['allocated_amount'];
-        $date         = date('Y-m-d');
-        $end_datetime = trim($_POST['end_datetime'] ?? '');
-        if ($end_datetime === '') $end_datetime = null;
+        $budget_id  = (int)$_POST['budget_id'];
+        $encoder_id = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : null;
+        $is_shared  = isset($_POST['is_shared']) ? 1 : 0;
+        $title      = trim($_POST['allocation_title']);
+        $purpose    = trim($_POST['purpose']);
+        $amount     = (float)$_POST['allocated_amount'];
+        $date       = date('Y-m-d');
 
-        if ($is_shared) $encoder_id = 0;  // 0 means shared/no specific encoder
+        if ($is_shared) $encoder_id = null;
 
         // Check how much is still available in this specific budget
         $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
         if (!$budget) {
             $msg = 'Selected budget period not found or not approved.'; $msgType = 'danger';
         } else {
-            // Sum allocations already approved OR pending against THIS budget to prevent double-booking
+            // Sum allocations already approved against THIS budget only
             $alreadyAllocated = (float)$conn->query("
                 SELECT COALESCE(SUM(allocated_amount), 0) AS s
                 FROM budget_allocations
                 WHERE budget_id = $budget_id
-                  AND admin_approval_status IN ('approved','pending')
+                  AND admin_approval_status = 'approved'
             ")->fetch_assoc()['s'];
 
             $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
@@ -43,26 +41,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      . number_format($budgetRemaining, 2) . ').';
                 $msgType = 'danger';
             } else {
-                // Use direct SQL with safe integer cast; encoder_id=0 means shared (NULL in DB via NULLIF)
-                $endDtVal = $end_datetime ? "'" . $conn->real_escape_string($end_datetime) . "'" : 'NULL';
                 $stmt = $conn->prepare("
                     INSERT INTO budget_allocations
                         (budget_id, encoder_id, is_shared, allocation_title, purpose,
-                         allocated_amount, allocation_date, end_datetime,
-                         admin_approval_status, created_by)
-                    VALUES (?, NULLIF(?, 0), ?, ?, ?, ?, ?, $endDtVal, 'pending', ?)
+                         allocated_amount, allocation_date,
+                         admin_approval_status, admin_approved_by, admin_approved_at, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, NOW(), ?)
                 ");
-                // 8 placeholders: end_datetime inlined above (avoids nullable bind complexity)
-                $stmt->bind_param("iiissdsi",
+                // 9 placeholders: budget_id(i), encoder_id(i), is_shared(i),
+                //                 title(s), purpose(s), amount(d), date(s),
+                //                 admin_approved_by(i), created_by(i)
+                $stmt->bind_param("iiissdsii",
                     $budget_id, $encoder_id, $is_shared,
                     $title, $purpose, $amount, $date,
-                    $uid);
+                    $uid, $uid);
                 $stmt->execute(); $stmt->close();
 
                 logActivity($conn, 'CREATE_ALLOCATION',
-                    "Submitted allocation request ₱$amount from budget #$budget_id: $title (pending admin approval)");
-                $msg = 'Allocation submitted for Admin approval. ₱' . number_format($amount, 2)
-                     . ' will be available to the encoder once approved.';
+                    "Allocated ₱$amount from budget #$budget_id: $title");
+                $msg = 'Allocation created. ₱' . number_format($amount, 2)
+                     . ' is now available to the encoder immediately.';
                 $msgType = 'success';
             }
         }
@@ -73,8 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $budgets = $conn->query("
     SELECT b.*,
            COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.allocated_amount ELSE 0 END), 0) AS total_allocated,
-           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.amount_used ELSE 0 END), 0)      AS total_used,
-           COALESCE(SUM(CASE WHEN ba.admin_approval_status IN ('approved','pending') THEN ba.allocated_amount ELSE 0 END), 0) AS total_committed
+           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.amount_used ELSE 0 END), 0)      AS total_used
     FROM budgets b
     LEFT JOIN budget_allocations ba ON ba.budget_id = b.id
     WHERE b.approval_status = 'approved'
@@ -82,9 +79,9 @@ $budgets = $conn->query("
     ORDER BY b.id DESC
 ")->fetch_all(MYSQLI_ASSOC);
 
-// Add computed remaining per budget (deducting both approved and pending to prevent overbooking)
+// Add computed remaining per budget
 foreach ($budgets as &$b) {
-    $b['budget_remaining'] = $b['allocated_amount'] - $b['total_committed'];
+    $b['budget_remaining'] = $b['allocated_amount'] - $b['total_allocated'];
 }
 unset($b);
 
@@ -227,14 +224,9 @@ include '../includes/header.php';
                     <i class="fas fa-exclamation-triangle"></i> Amount exceeds the unallocated balance!
                 </div>
             </div>
-            <div class="form-group">
-                <label>End Date &amp; Time * <span style="font-size:11px;color:var(--text-muted);">(encoder cannot use allocation after this)</span></label>
-                <input type="datetime-local" name="end_datetime" class="form-control" required
-                       min="<?= date('Y-m-d\TH:i') ?>">
-            </div>
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-                <i class="fas fa-info-circle" style="color:var(--warning)"></i>
-                Allocations require <strong>Admin approval</strong> before they become available to the encoder.
+                <i class="fas fa-check-circle" style="color:var(--success)"></i>
+                Allocations are <strong>immediately available</strong> to the encoder — no extra Admin approval needed.
             </p>
             <button type="submit" class="btn btn-gold" style="width:100%">
                 <i class="fas fa-plus"></i> Create Allocation
@@ -250,7 +242,7 @@ include '../includes/header.php';
         <?php foreach ($allocations as $a):
             $rem = $a['allocated_amount'] - $a['amount_used'];
         ?>
-        <div style="border:1px solid var(--grey-200);border-radius:10px;padding:14px;margin-bottom:10px;<?= (!empty($a['end_datetime']) && strtotime($a['end_datetime']) < time()) ? 'opacity:.65;border-color:var(--danger);' : '' ?>">
+        <div style="border:1px solid var(--grey-200);border-radius:10px;padding:14px;margin-bottom:10px;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
                 <div>
                     <strong style="font-size:14px;"><?= htmlspecialchars($a['allocation_title'] ?? '—') ?></strong>

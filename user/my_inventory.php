@@ -14,13 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'consu
     $ei = $conn->query("SELECT * FROM encoder_inventory WHERE id=$ei_id AND encoder_id=$uid")->fetch_assoc();
     if ($ei) {
         $remaining = $ei['quantity_assigned'] - $ei['quantity_consumed'];
-        // Check if usage period has expired
-        if (!empty($ei['end_datetime']) && strtotime($ei['end_datetime']) < time()) {
-            $msg = 'This inventory assignment expired on '
-                 . date('M d, Y h:i A', strtotime($ei['end_datetime']))
-                 . '. You can no longer log consumption. A return request has been generated if there is unused stock.';
-            $msgType = 'danger';
-        } elseif ($qty > $remaining) {
+        if ($qty > $remaining) {
             $msg = 'Consumption exceeds remaining stock.'; $msgType = 'danger';
         } else {
             $stmt = $conn->prepare("INSERT INTO inventory_consumption_log (encoder_inventory_id, encoder_id, quantity_consumed, purpose, consumed_at) VALUES (?,?,?,?,NOW())");
@@ -72,9 +66,8 @@ include '../includes/header.php';
             <?php foreach ($myInventory as $i => $ei):
                 $remaining = $ei['quantity_assigned'] - $ei['quantity_consumed'];
                 $pct = $ei['quantity_assigned'] > 0 ? min(100, ($ei['quantity_consumed']/$ei['quantity_assigned'])*100) : 0;
-                $rowExpired = !empty($ei['end_datetime']) && strtotime($ei['end_datetime']) < time();
             ?>
-            <tr style="<?= $rowExpired ? 'opacity:.6;background:rgba(185,28,28,.04);' : '' ?>">
+            <tr>
                 <td><?= $i+1 ?></td>
                 <td><strong><?= htmlspecialchars($ei['item_name']) ?></strong></td>
                 <td><?= htmlspecialchars($ei['unit']) ?></td>
@@ -84,11 +77,7 @@ include '../includes/header.php';
                 <td style="font-size:12px;color:var(--text-muted);"><?= htmlspecialchars($ei['purpose']??$ei['request_desc']??'—') ?></td>
                 <td style="font-size:12px;"><?= $ei['end_datetime'] ? date('M d, Y H:i', strtotime($ei['end_datetime'])) : '—' ?></td>
                 <td>
-                    <?php
-                    $isExpired = !empty($ei['end_datetime']) && strtotime($ei['end_datetime']) < time();
-                    if ($isExpired): ?>
-                    <span style="font-size:12px;color:var(--danger);font-weight:600;"><i class="fas fa-lock"></i> Expired</span>
-                    <?php elseif ($remaining > 0): ?>
+                    <?php if ($remaining > 0): ?>
                     <button class="btn btn-sm btn-gold" onclick="openConsume(<?= $ei['id'] ?>, '<?= htmlspecialchars(addslashes($ei['item_name'])) ?>', '<?= htmlspecialchars($ei['unit']) ?>', <?= $remaining ?>)"><i class="fas fa-minus"></i> Use</button>
                     <?php else: ?>
                     <span style="font-size:12px;color:var(--text-muted)">Depleted</span>

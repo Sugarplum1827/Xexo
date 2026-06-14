@@ -33,33 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $iunit  = $conn->real_escape_string($inv['unit']);
                 $purpose= $conn->real_escape_string($req['description']??'');
                 $conn->query("INSERT INTO encoder_inventory (inventory_request_id, encoder_id, inventory_id, item_name, unit, quantity_assigned, quantity_consumed, assigned_date, purpose) VALUES ($rid,$enc_id,$inv_id,'$iname','$iunit',$qty_released,0,NOW(),'$purpose')");
-                $ei_id = $conn->insert_id;
-
-                // Auto-create a return_request due at the request's end_datetime
-                // so the encoder is prompted to return unused inventory when time is up.
-                if (!empty($req['end_datetime'])) {
-                    $dueEsc = $conn->real_escape_string($req['end_datetime']);
-                    $existing = $conn->query("
-                        SELECT id FROM return_requests
-                        WHERE encoder_inventory_id = $ei_id AND return_type = 'inventory'
-                        LIMIT 1
-                    ")->fetch_assoc();
-
-                    if (!$existing) {
-                        $conn->query("
-                            INSERT INTO return_requests
-                                (return_type, encoder_id, encoder_inventory_id, original_purpose,
-                                 return_quantity, return_status, due_datetime, created_at)
-                            VALUES
-                                ('inventory', $enc_id, $ei_id, '$purpose',
-                                 $qty_released, 'not_yet_returned', '$dueEsc', NOW())
-                        ");
-                    }
-                }
-
-                logActivity($conn,'APPROVE_INVENTORY_REQUEST',"Approved inventory request ID $rid: released $qty_released {$inv['unit']} of {$req['item_name']} — return request auto-created");
-                $msg = 'Request approved and inventory assigned to encoder. A return request has been scheduled for the stated end date.';
-                $msgType = 'success';
+                logActivity($conn,'APPROVE_INVENTORY_REQUEST',"Approved inventory request ID $rid: released $qty_released {$inv['unit']} of {$req['item_name']}");
+                $msg = 'Request approved and inventory assigned to encoder.'; $msgType = 'success';
             }
         }
     }

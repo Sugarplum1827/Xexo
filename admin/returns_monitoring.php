@@ -56,10 +56,7 @@ include '../includes/header.php';
                 <td><strong><?= htmlspecialchars($r['return_type']==='budget' ? ($r['allocation_title']??'—') : ($r['inv_item']??'—')) ?></strong></td>
                 <td><?= $r['return_type']==='budget' ? formatCurrency($r['return_amount']??0) : ($r['return_quantity'].' '.($r['inv_unit']??'')) ?></td>
                 <td style="font-size:12px;color:var(--text-muted);"><?= htmlspecialchars($r['original_purpose']??'—') ?></td>
-                <td style="font-size:12px;"><?= date('M d, Y H:i', strtotime($r['due_datetime'])) ?>
-                    <?php if ($r['return_status'] !== 'returned' && strtotime($r['due_datetime']) < time()): ?>
-                    <span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">OVERDUE</span>
-                    <?php endif; ?></td>
+                <td style="font-size:12px;"><?= date('M d, Y H:i', strtotime($r['due_datetime'])) ?></td>
                 <td><span class="badge <?= $r['return_status']==='returned'?'badge-approved':'badge-pending' ?>"><?= $r['return_status']==='returned'?'Returned':'Not Yet Returned' ?></span></td>
                 <td>
                     <?php if ($r['attachment_path']): ?>
