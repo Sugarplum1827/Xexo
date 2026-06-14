@@ -8,11 +8,24 @@ $msg = ''; $msgType = '';
 
 // Handle consumption
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'consume') {
-    $ei_id  = (int)$_POST['encoder_inventory_id'];
-    $qty    = (float)$_POST['quantity_consumed'];
-    $purpose= trim($_POST['purpose']);
-    $ei = $conn->query("SELECT * FROM encoder_inventory WHERE id=$ei_id AND encoder_id=$uid")->fetch_assoc();
-    if ($ei) {
+    $ei_id   = (int)$_POST['encoder_inventory_id'];
+    $qty     = (float)$_POST['quantity_consumed'];
+    $purpose = trim($_POST['purpose']);
+
+    // Fetch and check expiry in the same query
+    $ei = $conn->query("
+        SELECT * FROM encoder_inventory
+        WHERE id = $ei_id AND encoder_id = $uid
+    ")->fetch_assoc();
+
+    if (!$ei) {
+        $msg = 'Invalid inventory record.'; $msgType = 'danger';
+    } elseif ($ei['end_datetime'] && strtotime($ei['end_datetime']) <= time()) {
+        $msg = 'Access expired. This inventory assignment ended on '
+             . date('M d, Y H:i', strtotime($ei['end_datetime']))
+             . '. You can no longer consume from it.';
+        $msgType = 'danger';
+    } else {
         $remaining = $ei['quantity_assigned'] - $ei['quantity_consumed'];
         if ($qty > $remaining) {
             $msg = 'Consumption exceeds remaining stock.'; $msgType = 'danger';
@@ -20,12 +33,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'consu
             $stmt = $conn->prepare("INSERT INTO inventory_consumption_log (encoder_inventory_id, encoder_id, quantity_consumed, purpose, consumed_at) VALUES (?,?,?,?,NOW())");
             $stmt->bind_param("iids", $ei_id, $uid, $qty, $purpose);
             $stmt->execute(); $stmt->close();
-            $conn->query("UPDATE encoder_inventory SET quantity_consumed=quantity_consumed+$qty WHERE id=$ei_id");
+            $conn->query("UPDATE encoder_inventory SET quantity_consumed = quantity_consumed + $qty WHERE id = $ei_id");
             logActivity($conn, 'CONSUME_INVENTORY', "Consumed {$qty} {$ei['unit']} of {$ei['item_name']}");
             $msg = 'Consumption recorded successfully.'; $msgType = 'success';
         }
-    } else {
-        $msg = 'Invalid inventory record.'; $msgType = 'danger';
     }
 }
 
@@ -64,10 +75,11 @@ include '../includes/header.php';
             <thead><tr><th>#</th><th>Item</th><th>Unit</th><th>Assigned</th><th>Consumed</th><th>Remaining</th><th>Purpose</th><th>Due</th><th>Action</th></tr></thead>
             <tbody>
             <?php foreach ($myInventory as $i => $ei):
-                $remaining = $ei['quantity_assigned'] - $ei['quantity_consumed'];
-                $pct = $ei['quantity_assigned'] > 0 ? min(100, ($ei['quantity_consumed']/$ei['quantity_assigned'])*100) : 0;
+                $remaining  = $ei['quantity_assigned'] - $ei['quantity_consumed'];
+                $pct        = $ei['quantity_assigned'] > 0 ? min(100, ($ei['quantity_consumed']/$ei['quantity_assigned'])*100) : 0;
+                $expired    = $ei['end_datetime'] && strtotime($ei['end_datetime']) <= time();
             ?>
-            <tr>
+            <tr style="<?= $expired ? 'opacity:.6;background:rgba(185,28,28,.03);' : '' ?>">
                 <td><?= $i+1 ?></td>
                 <td><strong><?= htmlspecialchars($ei['item_name']) ?></strong></td>
                 <td><?= htmlspecialchars($ei['unit']) ?></td>
@@ -75,10 +87,23 @@ include '../includes/header.php';
                 <td><?= $ei['quantity_consumed'] ?></td>
                 <td style="font-weight:700;color:<?= $remaining>0?'var(--success)':'var(--danger)' ?>"><?= round($remaining, 3) ?></td>
                 <td style="font-size:12px;color:var(--text-muted);"><?= htmlspecialchars($ei['purpose']??$ei['request_desc']??'—') ?></td>
-                <td style="font-size:12px;"><?= $ei['end_datetime'] ? date('M d, Y H:i', strtotime($ei['end_datetime'])) : '—' ?></td>
+                <td style="font-size:12px;">
+                    <?php if ($ei['end_datetime']): ?>
+                        <span style="color:<?= $expired?'var(--danger)':'var(--text)' ?>;font-weight:<?= $expired?'700':'400' ?>;">
+                            <?= date('M d, Y H:i', strtotime($ei['end_datetime'])) ?>
+                        </span>
+                        <?php if ($expired): ?>
+                        <span class="badge badge-rejected" style="font-size:10px;display:block;margin-top:2px;">EXPIRED</span>
+                        <?php endif; ?>
+                    <?php else: ?>—<?php endif; ?>
+                </td>
                 <td>
-                    <?php if ($remaining > 0): ?>
-                    <button class="btn btn-sm btn-gold" onclick="openConsume(<?= $ei['id'] ?>, '<?= htmlspecialchars(addslashes($ei['item_name'])) ?>', '<?= htmlspecialchars($ei['unit']) ?>', <?= $remaining ?>)"><i class="fas fa-minus"></i> Use</button>
+                    <?php if ($expired): ?>
+                    <span style="font-size:12px;color:var(--danger);font-weight:600;"><i class="fas fa-lock"></i> Expired</span>
+                    <?php elseif ($remaining > 0): ?>
+                    <button class="btn btn-sm btn-gold" onclick="openConsume(<?= $ei['id'] ?>, '<?= htmlspecialchars(addslashes($ei['item_name'])) ?>', '<?= htmlspecialchars($ei['unit']) ?>', <?= $remaining ?>)">
+                        <i class="fas fa-minus"></i> Use
+                    </button>
                     <?php else: ?>
                     <span style="font-size:12px;color:var(--text-muted)">Depleted</span>
                     <?php endif; ?>

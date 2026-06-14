@@ -14,7 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qty   = (float)$_POST['quantity_requested'];
         $unit  = trim($_POST['unit']);
         $desc  = trim($_POST['description']);
-        $end   = $_POST['end_datetime'];
+        $end   = str_replace('T', ' ', $_POST['end_datetime']);
+        if (strlen($end) === 16) $end .= ':00';
         $stmt = $conn->prepare("INSERT INTO inventory_requests (item_name, quantity_requested, unit, description, end_datetime, encoder_id, status, created_at) VALUES (?,?,?,?,?,?,'pending',NOW())");
         $stmt->bind_param("sdssis", $item, $qty, $unit, $desc, $end, $uid);
         $stmt->execute(); $stmt->close();

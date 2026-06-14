@@ -13,7 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $title  = trim($_POST['request_title']);
         $desc   = trim($_POST['description']);
         $amount = (float)$_POST['requested_amount'];
-        $end    = $_POST['end_datetime'];
+        $end    = str_replace('T', ' ', $_POST['end_datetime']);
+        if (strlen($end) === 16) $end .= ':00';
         $stmt = $conn->prepare("INSERT INTO budget_requests (request_title, description, requested_amount, end_datetime, encoder_id, status, created_at) VALUES (?,?,?,?,?,'pending',NOW())");
         $stmt->bind_param("ssdsi", $title, $desc, $amount, $end, $uid);
         $stmt->execute(); $stmt->close();
@@ -26,7 +27,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $title  = trim($_POST['request_title']);
         $desc   = trim($_POST['description']);
         $amount = (float)$_POST['requested_amount'];
-        $end    = $_POST['end_datetime'];
+        $end    = str_replace('T', ' ', $_POST['end_datetime']);
+        if (strlen($end) === 16) $end .= ':00';
         // Only editable if pending
         $check = $conn->query("SELECT status FROM budget_requests WHERE id=$rid AND encoder_id=$uid")->fetch_assoc();
         if ($check && $check['status'] === 'pending') {

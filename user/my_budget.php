@@ -65,6 +65,7 @@ include '../includes/header.php';
                     <th>Used</th>
                     <th>Remaining</th>
                     <th>Utilization</th>
+                    <th>End Date/Time</th>
                     <th>Date</th>
                 </tr>
             </thead>
@@ -74,18 +75,20 @@ include '../includes/header.php';
                 $pct = $a['allocated_amount'] > 0
                     ? min(100, ($a['amount_used'] / $a['allocated_amount']) * 100)
                     : 0;
+                $expired = $a['end_datetime'] && strtotime($a['end_datetime']) <= time();
             ?>
-            <tr>
+            <tr style="<?= $expired ? 'opacity:.6;background:rgba(185,28,28,.03);' : '' ?>">
                 <td><?= $i + 1 ?></td>
                 <td>
                     <strong><?= htmlspecialchars($a['allocation_title'] ?? '—') ?></strong>
                     <?php if ($a['is_shared']): ?>
                     <span class="badge badge-pending" style="font-size:10px;margin-left:4px;">Shared</span>
                     <?php endif; ?>
+                    <?php if ($expired): ?>
+                    <span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">EXPIRED</span>
+                    <?php endif; ?>
                     <?php if ($a['purpose']): ?>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                        <?= htmlspecialchars($a['purpose']) ?>
-                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;"><?= htmlspecialchars($a['purpose']) ?></div>
                     <?php endif; ?>
                 </td>
                 <td style="font-size:12px;"><?= htmlspecialchars($a['period_label']) ?></td>
@@ -105,6 +108,12 @@ include '../includes/header.php';
                              style="width:<?= $pct ?>%"></div>
                     </div>
                     <div style="font-size:11px;color:var(--text-muted);"><?= number_format($pct, 1) ?>% used</div>
+                </td>
+                <td style="font-size:12px;<?= $expired ? 'color:var(--danger);font-weight:600;' : '' ?>">
+                    <?php if ($a['end_datetime']): ?>
+                        <?= date('M d, Y H:i', strtotime($a['end_datetime'])) ?>
+                        <?php if ($expired): ?><br><small>Access ended</small><?php endif; ?>
+                    <?php else: ?>—<?php endif; ?>
                 </td>
                 <td style="font-size:12px;color:var(--text-muted);"><?= $a['allocation_date'] ?></td>
             </tr>

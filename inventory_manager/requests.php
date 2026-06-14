@@ -27,12 +27,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute(); $stmt->close();
                 // Deduct from master inventory
                 $conn->query("UPDATE inventory SET current_stock=current_stock-$qty_released WHERE id=$inv_id");
-                // Add to encoder_inventory
-                $enc_id = $req['encoder_id'];
-                $iname  = $conn->real_escape_string($req['item_name']);
-                $iunit  = $conn->real_escape_string($inv['unit']);
-                $purpose= $conn->real_escape_string($req['description']??'');
-                $conn->query("INSERT INTO encoder_inventory (inventory_request_id, encoder_id, inventory_id, item_name, unit, quantity_assigned, quantity_consumed, assigned_date, purpose) VALUES ($rid,$enc_id,$inv_id,'$iname','$iunit',$qty_released,0,NOW(),'$purpose')");
+                // Add to encoder_inventory with end_datetime from the request
+                $enc_id  = $req['encoder_id'];
+                $iname   = $conn->real_escape_string($req['item_name']);
+                $iunit   = $conn->real_escape_string($inv['unit']);
+                $purpose = $conn->real_escape_string($req['description'] ?? '');
+                $end_dt  = $conn->real_escape_string($req['end_datetime']);
+                $conn->query("INSERT INTO encoder_inventory (inventory_request_id, encoder_id, inventory_id, item_name, unit, quantity_assigned, quantity_consumed, assigned_date, end_datetime, purpose) VALUES ($rid,$enc_id,$inv_id,'$iname','$iunit',$qty_released,0,NOW(),'$end_dt','$purpose')");
                 logActivity($conn,'APPROVE_INVENTORY_REQUEST',"Approved inventory request ID $rid: released $qty_released {$inv['unit']} of {$req['item_name']}");
                 $msg = 'Request approved and inventory assigned to encoder.'; $msgType = 'success';
             }

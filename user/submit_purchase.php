@@ -7,8 +7,7 @@ $uid = $_SESSION['user_id'];
 $msg = ''; $msgType = '';
 
 function loadAllocations($conn, $uid) {
-    // Shared allocations: remaining = allocated_amount - amount_used (shared pool)
-    // Personal allocations: remaining = allocated_amount - amount_used (per encoder)
+    // Only return allocations that have NOT yet expired (end_datetime > NOW() or NULL)
     $rows = $conn->query("
         SELECT ba.*,
                b.period_label,
@@ -21,6 +20,7 @@ function loadAllocations($conn, $uid) {
                 (ba.is_shared = 0 AND ba.encoder_id = $uid)
              OR (ba.is_shared = 1)
           )
+          AND (ba.end_datetime IS NULL OR ba.end_datetime > NOW())
         ORDER BY ba.is_shared ASC, ba.allocation_date DESC
     ")->fetch_all(MYSQLI_ASSOC);
 
@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $alloc_id = (int)$_POST['allocation_id'];
     $total    = round($qty * $price, 2);
 
-    // Re-query DB directly — authoritative check
+    // Re-query DB directly — authoritative check including expiry
     $alloc = $conn->query("
         SELECT ba.*, b.period_label, b.start_date AS budget_start, b.end_date AS budget_end
         FROM budget_allocations ba
@@ -56,11 +56,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (ba.is_shared = 0 AND ba.encoder_id = $uid)
              OR (ba.is_shared = 1)
           )
+          AND (ba.end_datetime IS NULL OR ba.end_datetime > NOW())
         LIMIT 1
     ")->fetch_assoc();
 
     if (!$alloc) {
-        $msg = 'Invalid or unauthorized budget allocation selected. Please refresh and try again.';
+        $msg = 'This allocation is either invalid, unauthorized, or has expired. You can no longer submit purchases against it.';
         $msgType = 'danger';
     } elseif ($total <= 0) {
         $msg = 'Purchase total must be greater than zero.';

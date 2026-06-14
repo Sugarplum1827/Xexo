@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS budget_allocations (
     allocated_amount DECIMAL(12,2) NOT NULL,
     amount_used DECIMAL(12,2) DEFAULT 0,
     allocation_date DATE NOT NULL,
+    end_datetime DATETIME NULL,   -- encoder loses access after this datetime
     admin_approval_status ENUM('pending','approved','rejected') DEFAULT 'pending',
     admin_approved_by INT NULL,
     admin_approved_at DATETIME NULL,
@@ -208,6 +209,7 @@ CREATE TABLE IF NOT EXISTS encoder_inventory (
     quantity_consumed DECIMAL(10,3) DEFAULT 0,
     quantity_remaining DECIMAL(10,3) GENERATED ALWAYS AS (quantity_assigned - quantity_consumed) STORED,
     assigned_date DATETIME NOT NULL,
+    end_datetime DATETIME NULL,   -- encoder loses access after this datetime
     purpose TEXT,
     FOREIGN KEY (inventory_request_id) REFERENCES inventory_requests(id),
     FOREIGN KEY (encoder_id) REFERENCES users(id),
@@ -279,3 +281,22 @@ INSERT IGNORE INTO inventory (item_name, category, unit, current_stock, minimum_
 ('Eggs', 'Dairy', 'pcs', 120, 24, 9.50),
 ('Soy Sauce', 'Condiments', 'bottle', 6, 2, 35.00),
 ('Vinegar', 'Condiments', 'bottle', 5, 2, 28.00);
+
+-- =============================================
+-- MIGRATION: Add end_datetime to existing tables
+-- Safe to run on both new and existing databases
+-- =============================================
+ALTER TABLE budget_allocations
+    ADD COLUMN IF NOT EXISTS end_datetime DATETIME NULL
+        COMMENT 'Encoder loses access after this datetime';
+
+ALTER TABLE encoder_inventory
+    ADD COLUMN IF NOT EXISTS end_datetime DATETIME NULL
+        COMMENT 'Encoder loses access after this datetime';
+
+-- Fix any rows where end_datetime was incorrectly saved as zero date
+-- (caused by datetime-local "T" separator not being converted before MySQL insert)
+UPDATE budget_allocations SET end_datetime = NULL WHERE end_datetime = '0000-00-00 00:00:00';
+UPDATE encoder_inventory   SET end_datetime = NULL WHERE end_datetime = '0000-00-00 00:00:00';
+UPDATE budget_requests     SET end_datetime = '2099-12-31 23:59:59' WHERE end_datetime = '0000-00-00 00:00:00';
+UPDATE inventory_requests  SET end_datetime = '2099-12-31 23:59:59' WHERE end_datetime = '0000-00-00 00:00:00';

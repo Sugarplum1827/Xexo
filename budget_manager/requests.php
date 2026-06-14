@@ -37,19 +37,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param("isi", $uid, $rmk, $rid);
                 $stmt->execute(); $stmt->close();
 
-                // Create allocation — directly APPROVED (encoder can use immediately)
-                $enc_id  = $req['encoder_id'];
-                $title   = $conn->real_escape_string($req['request_title']);
-                $purpose = $conn->real_escape_string($req['description'] ?? '');
-                $date    = date('Y-m-d');
+                // Create allocation — directly APPROVED, end_datetime from the original request
+                $enc_id      = $req['encoder_id'];
+                $title       = $conn->real_escape_string($req['request_title']);
+                $purpose     = $conn->real_escape_string($req['description'] ?? '');
+                $end_dt      = $conn->real_escape_string($req['end_datetime']);
+                $date        = date('Y-m-d');
                 $conn->query("
                     INSERT INTO budget_allocations
                         (budget_id, budget_request_id, encoder_id, is_shared,
-                         allocation_title, purpose, allocated_amount, allocation_date,
+                         allocation_title, purpose, allocated_amount, allocation_date, end_datetime,
                          admin_approval_status, admin_approved_by, admin_approved_at, created_by)
                     VALUES
                         ($budget_id, $rid, $enc_id, 0,
-                         '$title', '$purpose', $alloc_amount, '$date',
+                         '$title', '$purpose', $alloc_amount, '$date', '$end_dt',
                          'approved', $uid, NOW(), $uid)
                 ");
 

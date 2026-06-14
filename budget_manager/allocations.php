@@ -10,58 +10,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $uid    = $_SESSION['user_id'];
 
     if ($action === 'create_allocation') {
-        $budget_id  = (int)$_POST['budget_id'];
-        $encoder_id = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : null;
-        $is_shared  = isset($_POST['is_shared']) ? 1 : 0;
-        $title      = trim($_POST['allocation_title']);
-        $purpose    = trim($_POST['purpose']);
-        $amount     = (float)$_POST['allocated_amount'];
-        $date       = date('Y-m-d');
+        $budget_id    = (int)$_POST['budget_id'];
+        $encoder_id   = ($_POST['encoder_id'] !== '') ? (int)$_POST['encoder_id'] : null;
+        $is_shared    = isset($_POST['is_shared']) ? 1 : 0;
+        $title        = trim($_POST['allocation_title']);
+        $purpose      = trim($_POST['purpose']);
+        $amount       = (float)$_POST['allocated_amount'];
+        $end_datetime = trim($_POST['end_datetime'] ?? ''); // new field
+        // datetime-local sends "2026-06-14T14:45" — convert to MySQL format "2026-06-14 14:45:00"
+        $end_datetime = str_replace('T', ' ', $end_datetime);
+        if (strlen($end_datetime) === 16) $end_datetime .= ':00'; // add seconds if missing
+        $date         = date('Y-m-d');
 
         if ($is_shared) $encoder_id = null;
 
-        // Check how much is still available in this specific budget
-        $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
-        if (!$budget) {
-            $msg = 'Selected budget period not found or not approved.'; $msgType = 'danger';
+        if (empty($end_datetime)) {
+            $msg = 'End Date & Time is required.'; $msgType = 'danger';
         } else {
-            // Sum allocations already approved against THIS budget only
-            $alreadyAllocated = (float)$conn->query("
-                SELECT COALESCE(SUM(allocated_amount), 0) AS s
-                FROM budget_allocations
-                WHERE budget_id = $budget_id
-                  AND admin_approval_status = 'approved'
-            ")->fetch_assoc()['s'];
-
-            $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
-
-            if ($amount > $budgetRemaining) {
-                $msg = 'Allocation amount (₱' . number_format($amount, 2) . ') exceeds the '
-                     . 'remaining unallocated balance of this budget period (₱'
-                     . number_format($budgetRemaining, 2) . ').';
-                $msgType = 'danger';
+            $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
+            if (!$budget) {
+                $msg = 'Selected budget period not found or not approved.'; $msgType = 'danger';
             } else {
-                $stmt = $conn->prepare("
-                    INSERT INTO budget_allocations
-                        (budget_id, encoder_id, is_shared, allocation_title, purpose,
-                         allocated_amount, allocation_date,
-                         admin_approval_status, admin_approved_by, admin_approved_at, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, NOW(), ?)
-                ");
-                // 9 placeholders: budget_id(i), encoder_id(i), is_shared(i),
-                //                 title(s), purpose(s), amount(d), date(s),
-                //                 admin_approved_by(i), created_by(i)
-                $stmt->bind_param("iiissdsii",
-                    $budget_id, $encoder_id, $is_shared,
-                    $title, $purpose, $amount, $date,
-                    $uid, $uid);
-                $stmt->execute(); $stmt->close();
+                $alreadyAllocated = (float)$conn->query("
+                    SELECT COALESCE(SUM(allocated_amount), 0) AS s
+                    FROM budget_allocations
+                    WHERE budget_id = $budget_id AND admin_approval_status = 'approved'
+                ")->fetch_assoc()['s'];
+                $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
 
-                logActivity($conn, 'CREATE_ALLOCATION',
-                    "Allocated ₱$amount from budget #$budget_id: $title");
-                $msg = 'Allocation created. ₱' . number_format($amount, 2)
-                     . ' is now available to the encoder immediately.';
-                $msgType = 'success';
+                if ($amount > $budgetRemaining) {
+                    $msg = 'Allocation amount (₱' . number_format($amount, 2) . ') exceeds the '
+                         . 'remaining unallocated balance (₱' . number_format($budgetRemaining, 2) . ').';
+                    $msgType = 'danger';
+                } else {
+                    $edtQ = $conn->real_escape_string($end_datetime);
+                    $stmt = $conn->prepare("
+                        INSERT INTO budget_allocations
+                            (budget_id, encoder_id, is_shared, allocation_title, purpose,
+                             allocated_amount, allocation_date, end_datetime,
+                             admin_approval_status, admin_approved_by, admin_approved_at, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, NOW(), ?)
+                    ");
+                    // 10 placeholders: i i i s s d s s i i
+                    $stmt->bind_param("iiissdssii",
+                        $budget_id, $encoder_id, $is_shared,
+                        $title, $purpose, $amount, $date, $edtQ,
+                        $uid, $uid);
+                    $stmt->execute(); $stmt->close();
+
+                    logActivity($conn, 'CREATE_ALLOCATION',
+                        "Allocated ₱$amount from budget #$budget_id: $title (expires $end_datetime)");
+                    $msg = 'Allocation created. ₱' . number_format($amount, 2)
+                         . ' is now available to the encoder until ' . date('M d, Y H:i', strtotime($end_datetime)) . '.';
+                    $msgType = 'success';
+                }
             }
         }
     }
@@ -224,6 +226,13 @@ include '../includes/header.php';
                     <i class="fas fa-exclamation-triangle"></i> Amount exceeds the unallocated balance!
                 </div>
             </div>
+            <div class="form-group">
+                <label>End Date &amp; Time * <small style="color:var(--text-muted);font-weight:400;">(encoder loses access after this)</small></label>
+                <input type="datetime-local" name="end_datetime" class="form-control" required>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+                    <i class="fas fa-lock"></i> After this datetime, the encoder cannot submit purchases or consume from this allocation — even if funds remain.
+                </div>
+            </div>
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                 <i class="fas fa-check-circle" style="color:var(--success)"></i>
                 Allocations are <strong>immediately available</strong> to the encoder — no extra Admin approval needed.
@@ -261,6 +270,14 @@ include '../includes/header.php';
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
                 <?= $a['is_shared'] ? '<i class="fas fa-users"></i> All Encoders' : htmlspecialchars($a['encoder_name'] ?? '—') ?>
             </div>
+            <?php if ($a['end_datetime']): ?>
+            <div style="font-size:12px;margin-bottom:6px;color:<?= strtotime($a['end_datetime'])<=time()?'var(--danger)':'var(--text-muted)' ?>;">
+                <i class="fas fa-clock"></i> Access ends: <?= date('M d, Y H:i', strtotime($a['end_datetime'])) ?>
+                <?php if (strtotime($a['end_datetime']) <= time()): ?>
+                <span class="badge badge-rejected" style="font-size:10px;margin-left:4px;">EXPIRED</span>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
             <div style="display:flex;gap:16px;font-size:13px;">
                 <span>Alloc: <strong><?= formatCurrency($a['allocated_amount']) ?></strong></span>
                 <span>Used: <strong style="color:var(--danger)"><?= formatCurrency($a['amount_used']) ?></strong></span>
