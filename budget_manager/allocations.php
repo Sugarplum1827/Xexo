@@ -32,9 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = 'Selected budget period not found or not approved.'; $msgType = 'danger';
             } else {
                 $alreadyAllocated = (float)$conn->query("
-                    SELECT COALESCE(SUM(allocated_amount), 0) AS s
-                    FROM budget_allocations
-                    WHERE budget_id = $budget_id AND admin_approval_status = 'approved'
+                    SELECT COALESCE(SUM(ba.allocated_amount), 0) AS s
+                    FROM budget_allocations ba
+                    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+                    WHERE ba.budget_id = $budget_id AND ba.admin_approval_status = 'approved'
+                      AND rr.id IS NULL
                 ")->fetch_assoc()['s'];
                 $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
 
@@ -69,13 +71,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Load all approved budgets with per-budget allocation stats
+// Load all approved budgets with per-budget allocation stats (excluding fully returned allocations)
 $budgets = $conn->query("
     SELECT b.*,
-           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.allocated_amount ELSE 0 END), 0) AS total_allocated,
-           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' THEN ba.amount_used ELSE 0 END), 0)      AS total_used
+           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' AND rr.id IS NULL THEN ba.allocated_amount ELSE 0 END), 0) AS total_allocated,
+           COALESCE(SUM(CASE WHEN ba.admin_approval_status='approved' AND rr.id IS NULL THEN ba.amount_used ELSE 0 END), 0)      AS total_used
     FROM budgets b
     LEFT JOIN budget_allocations ba ON ba.budget_id = b.id
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
     WHERE b.approval_status = 'approved'
     GROUP BY b.id
     ORDER BY b.id DESC

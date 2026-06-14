@@ -85,8 +85,20 @@ include '../includes/header.php';
                 <td style="font-size:12px;color:var(--danger);max-width:160px;"><?= htmlspecialchars($b['rejection_reason']??'—') ?></td>
                 <td>
                     <?php if ($b['approval_status'] === 'pending'): ?>
-                    <button class="btn btn-sm btn-success" onclick="openDecision(<?= $b['id'] ?>, 'approve', <?= json_encode($b['period_label']) ?>, <?= $b['allocated_amount'] ?>)"><i class="fas fa-check"></i></button>
-                    <button class="btn btn-sm btn-danger" onclick="openDecision(<?= $b['id'] ?>, 'reject')"><i class="fas fa-times"></i></button>
+                    <button class="btn btn-sm btn-success"
+                        data-id="<?= $b['id'] ?>"
+                        data-action="approve"
+                        data-label="<?= htmlspecialchars($b['period_label'], ENT_QUOTES) ?>"
+                        data-amount="<?= $b['allocated_amount'] ?>"
+                        onclick="openDecision(this.dataset.id, this.dataset.action, this.dataset.label, this.dataset.amount)">
+                        <i class="fas fa-check"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger"
+                        data-id="<?= $b['id'] ?>"
+                        data-action="reject"
+                        onclick="openDecision(this.dataset.id, this.dataset.action)">
+                        <i class="fas fa-times"></i>
+                    </button>
                     <?php else: ?>
                     <span style="font-size:12px;color:var(--text-muted);">Done</span>
                     <?php endif; ?>
@@ -127,6 +139,8 @@ const activeBudget = <?= json_encode(
 ) ?>;
 
 function openDecision(id, action, label, amount) {
+    label = label || '';
+    amount = amount || 0;
     document.getElementById('decisionBid').value = id;
     document.getElementById('decisionAction').value = action;
     document.getElementById('decisionTitle').textContent = action === 'approve' ? 'Approve Budget Proposal' : 'Reject Budget Proposal';

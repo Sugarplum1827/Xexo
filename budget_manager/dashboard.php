@@ -11,8 +11,22 @@ $todayExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purch
 $monthExpenses  = $conn->query("SELECT COALESCE(SUM(total_price),0) s FROM purchases WHERE status='approved' AND MONTH(purchase_date)=MONTH(NOW()) AND YEAR(purchase_date)=YEAR(NOW())")->fetch_assoc()['s'];
 $activeBudgetId = $activeBudget['id'] ?? 0;
 $budgetAmt      = $activeBudget['allocated_amount'] ?? 0;
-$totalAllocated = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
-$totalUsed      = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
+$totalAllocated = $conn->query("
+    SELECT COALESCE(SUM(ba.allocated_amount),0) s
+    FROM budget_allocations ba
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+    WHERE ba.admin_approval_status='approved'
+      AND ba.budget_id=$activeBudgetId
+      AND rr.id IS NULL
+")->fetch_assoc()['s'];
+$totalUsed      = $conn->query("
+    SELECT COALESCE(SUM(ba.amount_used),0) s
+    FROM budget_allocations ba
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+    WHERE ba.admin_approval_status='approved'
+      AND ba.budget_id=$activeBudgetId
+      AND rr.id IS NULL
+")->fetch_assoc()['s'];
 $remaining      = $budgetAmt - $totalAllocated;
 $usedPct        = $budgetAmt > 0 ? min(100, ($totalAllocated/$budgetAmt)*100) : 0;
 
@@ -28,8 +42,15 @@ $monthlyData = $conn->query("
     ORDER BY y ASC, m ASC
 ")->fetch_all(MYSQLI_ASSOC);
 
-// Excess budget returned
-$excessReturned = $conn->query("SELECT COALESCE(SUM(return_amount),0) s FROM return_requests WHERE return_type='budget' AND return_status='returned'")->fetch_assoc()['s'];
+// Excess budget returned — scoped to active budget period only
+$excessReturned = $conn->query("
+    SELECT COALESCE(SUM(rr.return_amount),0) s
+    FROM return_requests rr
+    JOIN budget_allocations ba ON rr.budget_allocation_id = ba.id
+    WHERE rr.return_type='budget'
+      AND rr.return_status='returned'
+      AND ba.budget_id=$activeBudgetId
+")->fetch_assoc()['s'];
 
 $recentExpenses = $conn->query("SELECT p.*, u.full_name FROM purchases p LEFT JOIN users u ON p.submitted_by=u.id WHERE p.status='approved' ORDER BY p.reviewed_at DESC LIMIT 8")->fetch_all(MYSQLI_ASSOC);
 

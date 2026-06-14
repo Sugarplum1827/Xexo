@@ -18,11 +18,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $budget = $conn->query("SELECT * FROM budgets WHERE id=$budget_id AND approval_status='approved'")->fetch_assoc();
 
         if ($req && $budget) {
-            // Per-budget remaining: sum only allocations tied to this budget
+            // Per-budget remaining: exclude fully returned allocations
             $alreadyAllocated = (float)$conn->query("
-                SELECT COALESCE(SUM(allocated_amount), 0) AS s
-                FROM budget_allocations
-                WHERE budget_id = $budget_id AND admin_approval_status = 'approved'
+                SELECT COALESCE(SUM(ba.allocated_amount), 0) AS s
+                FROM budget_allocations ba
+                LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+                WHERE ba.budget_id = $budget_id AND ba.admin_approval_status = 'approved'
+                  AND rr.id IS NULL
             ")->fetch_assoc()['s'];
             $budgetRemaining = $budget['allocated_amount'] - $alreadyAllocated;
 
@@ -91,10 +93,17 @@ $requests = $conn->query("
 
 $activeBudgets = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' AND end_date >= CURDATE() ORDER BY id DESC")->fetch_all(MYSQLI_ASSOC);
 
-// Remaining budget available for allocation — scoped to the active budget only
+// Remaining budget available for allocation — scoped to the active budget only, excluding returned allocations
 $activeBudgetId    = $activeBudgets[0]['id'] ?? 0;
 $totalApproved     = $activeBudgets[0]['allocated_amount'] ?? 0;
-$totalAllocated    = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
+$totalAllocated    = $conn->query("
+    SELECT COALESCE(SUM(ba.allocated_amount),0) s
+    FROM budget_allocations ba
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+    WHERE ba.admin_approval_status='approved'
+      AND ba.budget_id=$activeBudgetId
+      AND rr.id IS NULL
+")->fetch_assoc()['s'];
 $availableForAlloc = $totalApproved - $totalAllocated;
 
 include '../includes/header.php';
@@ -207,8 +216,13 @@ include '../includes/header.php';
                 <label>Budget Period *</label>
                 <select name="budget_id" class="form-control" required>
                     <?php foreach ($activeBudgets as $b):
-                        // Per-budget remaining
-                        $bAllocated = (float)$conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE budget_id={$b['id']} AND admin_approval_status='approved'")->fetch_assoc()['s'];
+                        // Per-budget remaining — exclude fully returned allocations
+                        $bAllocated = (float)$conn->query("
+                            SELECT COALESCE(SUM(ba.allocated_amount),0) s
+                            FROM budget_allocations ba
+                            LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+                            WHERE ba.budget_id={$b['id']} AND ba.admin_approval_status='approved' AND rr.id IS NULL
+                        ")->fetch_assoc()['s'];
                         $bRemaining = $b['allocated_amount'] - $bAllocated;
                     ?>
                     <option value="<?= $b['id'] ?>" <?= $bRemaining <= 0 ? 'disabled' : '' ?>>

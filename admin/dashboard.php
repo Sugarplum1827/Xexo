@@ -10,13 +10,41 @@ $pendingBudgets    = $conn->query("SELECT COUNT(*) c FROM budgets WHERE approval
 $pendingAllocations= $conn->query("SELECT COUNT(*) c FROM budget_allocations WHERE admin_approval_status='pending'")->fetch_assoc()['c'];
 $activeBudget      = $conn->query("SELECT * FROM budgets WHERE is_active=1 AND approval_status='approved' AND end_date >= CURDATE() ORDER BY id DESC LIMIT 1")->fetch_assoc();
 $activeBudgetId    = $activeBudget['id'] ?? 0;
-$totalAllocated    = $conn->query("SELECT COALESCE(SUM(allocated_amount),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
-$totalUsed         = $conn->query("SELECT COALESCE(SUM(amount_used),0) s FROM budget_allocations WHERE admin_approval_status='approved' AND budget_id=$activeBudgetId")->fetch_assoc()['s'];
+$totalAllocated    = $conn->query("
+    SELECT COALESCE(SUM(ba.allocated_amount),0) s
+    FROM budget_allocations ba
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+    WHERE ba.admin_approval_status='approved'
+      AND ba.budget_id=$activeBudgetId
+      AND rr.id IS NULL
+")->fetch_assoc()['s'];
+$totalUsed         = $conn->query("
+    SELECT COALESCE(SUM(ba.amount_used),0) s
+    FROM budget_allocations ba
+    LEFT JOIN return_requests rr ON rr.budget_allocation_id = ba.id AND rr.return_type='budget' AND rr.return_status='returned'
+    WHERE ba.admin_approval_status='approved'
+      AND ba.budget_id=$activeBudgetId
+      AND rr.id IS NULL
+")->fetch_assoc()['s'];
 $budgetAmt         = $activeBudget['allocated_amount'] ?? 0;
 $remaining         = $budgetAmt - $totalAllocated;
 $usedPct           = $budgetAmt > 0 ? min(100, ($totalAllocated/$budgetAmt)*100) : 0;
-$excessReturned    = $conn->query("SELECT COALESCE(SUM(return_amount),0) s FROM return_requests WHERE return_type='budget' AND return_status='returned'")->fetch_assoc()['s'];
-$pendingReturns    = $conn->query("SELECT COUNT(*) c FROM return_requests WHERE return_status='not_yet_returned'")->fetch_assoc()['c'];
+// Excess returned and pending returns — scoped to active budget period only
+$excessReturned    = $conn->query("
+    SELECT COALESCE(SUM(rr.return_amount),0) s
+    FROM return_requests rr
+    JOIN budget_allocations ba ON rr.budget_allocation_id = ba.id
+    WHERE rr.return_type='budget'
+      AND rr.return_status='returned'
+      AND ba.budget_id=$activeBudgetId
+")->fetch_assoc()['s'];
+$pendingReturns    = $conn->query("
+    SELECT COUNT(*) c
+    FROM return_requests rr
+    JOIN budget_allocations ba ON rr.budget_allocation_id = ba.id
+    WHERE rr.return_status='not_yet_returned'
+      AND ba.budget_id=$activeBudgetId
+")->fetch_assoc()['c'];
 
 // Monthly analytics (last 6 months)
 $monthlyAlloc = $conn->query("
