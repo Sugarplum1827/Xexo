@@ -264,24 +264,6 @@ CREATE TABLE IF NOT EXISTS return_requests (
     FOREIGN KEY (encoder_inventory_id) REFERENCES encoder_inventory(id),
     FOREIGN KEY (verified_by) REFERENCES users(id)
 );
-
--- NOTE: Do NOT insert admin here. Run setup.php in your browser to create the admin account.
-
--- Sample budget (pending admin approval)
-INSERT IGNORE INTO budgets (period_label, period_type, allocated_amount, start_date, end_date, is_active, approval_status) VALUES
-('2nd Semester 2025-2026', 'semestral', 150000.00, '2026-01-01', '2026-05-31', 1, 'approved');
-
--- Sample inventory items
-INSERT IGNORE INTO inventory (item_name, category, unit, current_stock, minimum_stock, unit_cost) VALUES
-('All-Purpose Flour', 'Dry Goods', 'kg', 25.5, 5, 55.00),
-('White Sugar', 'Dry Goods', 'kg', 18.0, 5, 65.00),
-('Cooking Oil', 'Condiments', 'L', 12.0, 3, 95.00),
-('Salt', 'Condiments', 'kg', 8.5, 2, 18.00),
-('Butter', 'Dairy', 'kg', 4.0, 2, 180.00),
-('Eggs', 'Dairy', 'pcs', 120, 24, 9.50),
-('Soy Sauce', 'Condiments', 'bottle', 6, 2, 35.00),
-('Vinegar', 'Condiments', 'bottle', 5, 2, 28.00);
-
 -- =============================================
 -- MIGRATION: Add end_datetime to existing tables
 -- Safe to run on both new and existing databases
